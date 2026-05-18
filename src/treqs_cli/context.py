@@ -1,7 +1,46 @@
 from __future__ import annotations
 
+import re
+import sys
+from dataclasses import dataclass
+from pathlib import Path
+
+from .config import AuthStore, RepoContextStore, find_repo_root
 from .errors import ConfigError
 from .models import AccessContext, AccessOwner, AccessProject, AuthState, RepoContext
+
+
+@dataclass
+class TreqsContext:
+    """Shared Click context for a single treqs invocation."""
+
+    api_url_override: str | None
+    json_output: bool
+    auth_store: AuthStore
+    repo_context_store: RepoContextStore
+    cwd: Path
+    repo_root: Path
+    is_interactive: bool
+
+    @classmethod
+    def create(
+        cls,
+        *,
+        api_url_override: str | None,
+        json_output: bool,
+        cwd: Path | None = None,
+    ) -> TreqsContext:
+        resolved_cwd = (cwd or Path.cwd()).resolve()
+        repo_root = find_repo_root(resolved_cwd)
+        return cls(
+            api_url_override=api_url_override,
+            json_output=json_output,
+            auth_store=AuthStore(),
+            repo_context_store=RepoContextStore(start=resolved_cwd),
+            cwd=resolved_cwd,
+            repo_root=repo_root,
+            is_interactive=sys.stdin.isatty(),
+        )
 
 
 def normalize_owner(value: str) -> str:
@@ -54,7 +93,11 @@ def resolve_project_selection(
         raise ConfigError(f"Project not found in access context: {selection}")
     if len(matches) > 1:
         raise ConfigError(f"Project selection is ambiguous: {selection}. Use <owner>/<project>.")
-    return matches[0]
+    owner, project = matches[0]
+    if not project.can_write:
+        scope = project_scope(owner, project)
+        raise ConfigError(f"Project is visible but not writable in TReqs access context: {scope}")
+    return owner, project
 
 
 def build_repo_context(
@@ -82,12 +125,31 @@ def project_scope(owner: AccessOwner, project: AccessProject) -> str:
 
 
 def _owner_matches(owner: AccessOwner, token: str) -> bool:
-    return token in {normalize_owner(owner.username), normalize_owner(owner.id)}
+    candidates = {
+        normalize_owner(owner.username),
+        normalize_owner(owner.id),
+    }
+    if owner.display_name:
+        candidates.add(normalize_owner(owner.display_name))
+        slug = _slugify(owner.display_name)
+        if slug:
+            candidates.add(slug)
+    return token in candidates
 
 
 def _project_matches(project: AccessProject, token: str) -> bool:
-    return token in {
+    candidates = {
         normalize_owner(project.slug),
         normalize_owner(project.id),
         normalize_owner(project.name),
     }
+    slug = _slugify(project.name)
+    if slug:
+        candidates.add(slug)
+    return token in candidates
+
+
+def _slugify(value: str) -> str | None:
+    normalized = normalize_owner(value)
+    slug = re.sub(r"[^a-z0-9]+", "-", normalized).strip("-")
+    return slug or None

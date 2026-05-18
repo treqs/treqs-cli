@@ -111,13 +111,18 @@ class AuthState(BaseModel):
             if isinstance(user_payload, dict)
             else None
         )
+        expires_at = parse_datetime(payload.get("expires_at"))
+        if expires_at is None:
+            expires_in = _float_value(payload.get("expires_in"))
+            if expires_in is not None:
+                expires_at = utc_now() + timedelta(seconds=max(expires_in, 0.0))
 
         return cls(
             version=1,
             api_url=api_url.rstrip("/"),
             access_token=access_token,
             refresh_token=_string_value(payload.get("refresh_token")),
-            expires_at=parse_datetime(payload.get("expires_at")),
+            expires_at=expires_at,
             refresh_expires_at=parse_datetime(payload.get("refresh_expires_at")),
             token_type=_string_value(payload.get("token_type")) or "Bearer",
             provider=_string_value(payload.get("provider")),
@@ -147,4 +152,10 @@ def _string_value(value: Any) -> str | None:
     if isinstance(value, str):
         normalized = value.strip()
         return normalized or None
+    return None
+
+
+def _float_value(value: Any) -> float | None:
+    if isinstance(value, int | float):
+        return float(value)
     return None

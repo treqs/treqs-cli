@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import subprocess
 from contextlib import suppress
 from pathlib import Path
 from typing import Any
@@ -25,6 +26,9 @@ def config_home() -> Path:
     override = os.environ.get("TREQS_CONFIG_HOME", "").strip()
     if override:
         return Path(override).expanduser()
+    xdg_config_home = os.environ.get("XDG_CONFIG_HOME", "").strip()
+    if xdg_config_home:
+        return Path(xdg_config_home).expanduser() / "treqs"
     return Path(user_config_dir("treqs", "TReqs"))
 
 
@@ -57,10 +61,21 @@ class AuthStore:
         self.path.parent.mkdir(parents=True, exist_ok=True)
         payload = state.model_dump(mode="json", exclude_none=True)
         tmp_path = self.path.with_suffix(f"{self.path.suffix}.tmp")
-        tmp_path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
-        tmp_path.replace(self.path)
-        with suppress(OSError):
-            self.path.chmod(0o600)
+        content = json.dumps(payload, indent=2, sort_keys=True) + "\n"
+        fd = os.open(tmp_path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8") as handle:
+                fd = -1
+                handle.write(content)
+            with suppress(OSError):
+                tmp_path.chmod(0o600)
+            tmp_path.replace(self.path)
+        finally:
+            if fd >= 0:
+                os.close(fd)
+            if tmp_path.exists():
+                with suppress(OSError):
+                    tmp_path.unlink()
         return self.path
 
     def delete(self) -> bool:
@@ -72,6 +87,18 @@ class AuthStore:
 
 def find_repo_root(start: Path | None = None) -> Path:
     current = (start or Path.cwd()).resolve()
+    try:
+        out = subprocess.check_output(
+            ["git", "rev-parse", "--show-toplevel"],
+            cwd=current,
+            stderr=subprocess.DEVNULL,
+            text=True,
+        ).strip()
+        if out:
+            return Path(out).resolve()
+    except (subprocess.CalledProcessError, FileNotFoundError, OSError):
+        pass
+
     for candidate in [current, *current.parents]:
         if (candidate / ".git").exists():
             return candidate
@@ -83,8 +110,8 @@ def repo_config_path(start: Path | None = None) -> Path:
 
 
 class RepoContextStore:
-    def __init__(self, path: Path | None = None) -> None:
-        self.path = path or repo_config_path()
+    def __init__(self, path: Path | None = None, *, start: Path | None = None) -> None:
+        self.path = path or repo_config_path(start)
 
     def load(self) -> RepoContext | None:
         if not self.path.exists():

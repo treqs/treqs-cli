@@ -45,20 +45,38 @@ class TreqsApiClient:
         interval = max(session.interval, 0.0)
 
         while time_fn() < deadline:
-            payload = self.request_json(
-                "POST",
-                "/api/v1/auth/device/token",
-                json_payload={"device_code": session.device_code},
-            )
+            try:
+                payload = self.request_json(
+                    "POST",
+                    "/api/v1/auth/device/token",
+                    json_payload={
+                        "device_code": session.device_code,
+                        "client_id": "treqs-cli",
+                    },
+                )
+            except ApiError as exc:
+                interval = _handle_device_poll_error(exc, interval=interval, sleep=sleep)
+                continue
             data = _unwrap_data(payload)
             status = data.get("status")
             if status == "authorization_pending":
                 interval = _float_value(data.get("interval"), default=interval)
                 sleep(interval)
                 continue
+            if status == "slow_down":
+                interval = _float_value(data.get("interval"), default=interval + 5.0)
+                sleep(interval)
+                continue
+            if status == "expired_token":
+                raise AuthError("Device authorization expired. Run `treqs login` again.")
+            if status == "access_denied":
+                raise AuthError("Device authorization was denied.")
             if status not in {None, "approved"}:
                 raise AuthError(f"Unexpected device authorization status: {status}")
-            return AuthState.from_token_payload(self.api_url, data)
+            try:
+                return AuthState.from_token_payload(self.api_url, data)
+            except ValueError as exc:
+                raise AuthError(str(exc)) from exc
 
         raise AuthError("Device authorization timed out before approval completed.")
 
@@ -68,9 +86,20 @@ class TreqsApiClient:
         payload = self.request_json(
             "POST",
             "/api/v1/auth/refresh",
-            json_payload={"refresh_token": auth_state.refresh_token},
+            json_payload={"refresh_token": auth_state.refresh_token, "client_id": "treqs-cli"},
         )
-        return AuthState.from_token_payload(self.api_url, _unwrap_data(payload))
+        try:
+            refreshed = AuthState.from_token_payload(self.api_url, _unwrap_data(payload))
+        except ValueError as exc:
+            raise AuthError(str(exc)) from exc
+        return refreshed.model_copy(
+            update={
+                "refresh_token": refreshed.refresh_token or auth_state.refresh_token,
+                "refresh_expires_at": refreshed.refresh_expires_at or auth_state.refresh_expires_at,
+                "provider": refreshed.provider or auth_state.provider,
+                "user": refreshed.user or auth_state.user,
+            }
+        )
 
     def logout(self, auth_state: AuthState) -> None:
         self.request_json(
@@ -80,7 +109,12 @@ class TreqsApiClient:
         )
 
     def get_access_context(self, auth_state: AuthState) -> AccessContext:
-        payload = self.request_json("GET", "/api/v1/user/access-context", auth_state=auth_state)
+        try:
+            payload = self.request_json("GET", "/api/v1/auth/access-context", auth_state=auth_state)
+        except ApiError as exc:
+            if exc.status_code != 404:
+                raise
+            payload = self.request_json("GET", "/api/v1/user/access-context", auth_state=auth_state)
         return AccessContext.model_validate(_unwrap_data(payload))
 
     def request_json(
@@ -108,9 +142,12 @@ class TreqsApiClient:
 
         payload = _response_payload(response)
         if response.status_code >= 400:
+            error_code, message = _error_details(payload)
             raise ApiError(
-                _error_message(payload, response.status_code),
+                message or f"TReqs API request failed with HTTP {response.status_code}",
                 status_code=response.status_code,
+                error_code=error_code,
+                payload=payload,
             )
         if not isinstance(payload, dict):
             raise ApiError("TReqs API returned a non-object JSON response.")
@@ -124,6 +161,26 @@ def ensure_fresh_auth(auth_store: Any, auth_state: AuthState) -> AuthState:
         refreshed = client.refresh_auth(auth_state)
     auth_store.save(refreshed)
     return refreshed
+
+
+def _handle_device_poll_error(
+    exc: ApiError,
+    *,
+    interval: float,
+    sleep: Callable[[float], None],
+) -> float:
+    if exc.error_code == "authorization_pending":
+        sleep(interval)
+        return interval
+    if exc.error_code == "slow_down":
+        slowed_interval = interval + 5.0
+        sleep(slowed_interval)
+        return slowed_interval
+    if exc.error_code == "expired_token":
+        raise AuthError("Device authorization expired. Run `treqs login` again.") from exc
+    if exc.error_code == "access_denied":
+        raise AuthError(str(exc) or "Device authorization was denied.") from exc
+    raise exc
 
 
 def _response_payload(response: httpx.Response) -> Any:
@@ -146,15 +203,25 @@ def _unwrap_data(payload: dict[str, Any]) -> dict[str, Any]:
 
 
 def _error_message(payload: Any, status_code: int | None) -> str:
-    if isinstance(payload, dict):
-        error = payload.get("error")
-        if isinstance(error, dict):
-            message = error.get("message")
-            if isinstance(message, str) and message.strip():
-                return message.strip()
+    _error_code, message = _error_details(payload)
+    if message:
+        return message
     if status_code is not None:
         return f"TReqs API request failed with HTTP {status_code}"
     return "TReqs API request failed"
+
+
+def _error_details(payload: Any) -> tuple[str | None, str | None]:
+    if isinstance(payload, dict):
+        error = payload.get("error")
+        if isinstance(error, dict):
+            code = error.get("code")
+            message = error.get("message")
+            return (
+                code.strip() if isinstance(code, str) and code.strip() else None,
+                message.strip() if isinstance(message, str) and message.strip() else None,
+            )
+    return None, None
 
 
 def _float_value(value: Any, *, default: float) -> float:

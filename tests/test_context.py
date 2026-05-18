@@ -1,10 +1,12 @@
 from __future__ import annotations
 
+import shutil
+import subprocess
 from pathlib import Path
 
 import pytest
 
-from treqs_cli.config import RepoContextStore
+from treqs_cli.config import RepoContextStore, find_repo_root
 from treqs_cli.context import (
     build_repo_context,
     owner_base_path,
@@ -39,6 +41,24 @@ def test_resolve_project_selection_requires_disambiguation() -> None:
 
     with pytest.raises(Exception, match="ambiguous"):
         resolve_project_selection(access_context, "mnist")
+
+
+def test_resolve_project_selection_rejects_read_only_project() -> None:
+    access_context = _access_context()
+
+    with pytest.raises(Exception, match="not writable"):
+        resolve_project_selection(access_context, "acme/readonly")
+
+
+def test_find_repo_root_uses_git_metadata_from_nested_directory(tmp_path: Path) -> None:
+    if shutil.which("git") is None:
+        pytest.skip("git is not installed")
+    repo = tmp_path / "repo"
+    nested = repo / "src" / "package"
+    nested.mkdir(parents=True)
+    subprocess.run(["git", "init"], cwd=repo, check=True, capture_output=True)
+
+    assert find_repo_root(nested) == repo.resolve()
 
 
 def test_repo_context_round_trip(tmp_path: Path) -> None:
@@ -104,7 +124,14 @@ def _access_context() -> AccessContext:
                         "name": "MNIST Org",
                         "visibility": "private",
                         "can_write": True,
-                    }
+                    },
+                    {
+                        "id": "project-readonly",
+                        "slug": "readonly",
+                        "name": "Read Only",
+                        "visibility": "private",
+                        "can_write": False,
+                    },
                 ],
             },
         }
