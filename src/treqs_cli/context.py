@@ -102,6 +102,26 @@ def resolve_project_selection(
     return owner, project
 
 
+def resolve_owner_selection(access_context: AccessContext, selection: str) -> AccessOwner:
+    normalized = normalize_owner(selection)
+    if not normalized:
+        raise ConfigError("Owner selection cannot be empty.")
+
+    matches = [owner for owner in access_context.owners if _owner_matches(owner, normalized)]
+    if not matches:
+        raise ConfigError(f"Owner not found in access context: {selection}")
+    if len(matches) > 1:
+        raise ConfigError(f"Owner selection is ambiguous: {selection}. Use the owner username.")
+    return matches[0]
+
+
+def current_user_owner(access_context: AccessContext) -> AccessOwner:
+    for owner in access_context.owners:
+        if owner.id == access_context.user.id:
+            return owner
+    return resolve_owner_selection(access_context, access_context.user.username)
+
+
 def build_repo_context(
     *,
     auth_state: AuthState,

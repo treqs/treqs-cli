@@ -245,6 +245,22 @@ def test_training_request_methods_use_project_paths_and_payloads() -> None:
                     ],
                 },
             )
+        if request.method == "POST" and request.url.path.endswith("/queue"):
+            return httpx.Response(
+                200,
+                json={
+                    "success": True,
+                    "data": {
+                        "trainingRequest": {
+                            "id": "request-1",
+                            "title": "Train model",
+                            "status": "queued",
+                            "projectSlug": "mnist",
+                        },
+                        "jobId": "job-1",
+                    },
+                },
+            )
         return httpx.Response(
             200,
             json={
@@ -276,14 +292,31 @@ def test_training_request_methods_use_project_paths_and_payloads() -> None:
         "/api/v1/user/projects/mnist/training-requests",
         {"title": "Train model", "status": "draft"},
     )
+    updated = client.update_training_request(
+        auth_state,
+        "/api/v1/user/projects/mnist/training-requests/request-1",
+        {"title": "Updated model"},
+    )
     fetched = client.get_training_request(
         auth_state,
         "/api/v1/user/projects/mnist/training-requests/request-1",
     )
+    opened = client.open_training_request(
+        auth_state,
+        "/api/v1/user/projects/mnist/training-requests/request-1/open",
+        {"workflowPath": ".github/workflows/train.yml", "computeSelection": {"targetId": "ct-1"}},
+    )
+    queued = client.queue_training_request(
+        auth_state,
+        "/api/v1/user/projects/mnist/training-requests/request-1/queue",
+    )
 
     assert listed[0].id == "request-1"
     assert created.id == "request-1"
+    assert updated.id == "request-1"
     assert fetched.id == "request-1"
+    assert opened.id == "request-1"
+    assert queued.jobId == "job-1"
     assert seen_requests == [
         (
             "GET",
@@ -298,11 +331,125 @@ def test_training_request_methods_use_project_paths_and_payloads() -> None:
             {"title": "Train model", "status": "draft"},
         ),
         (
+            "PATCH",
+            "/api/v1/user/projects/mnist/training-requests/request-1",
+            {},
+            {"title": "Updated model"},
+        ),
+        (
             "GET",
             "/api/v1/user/projects/mnist/training-requests/request-1",
             {},
             None,
         ),
+        (
+            "POST",
+            "/api/v1/user/projects/mnist/training-requests/request-1/open",
+            {},
+            {
+                "workflowPath": ".github/workflows/train.yml",
+                "computeSelection": {"targetId": "ct-1"},
+            },
+        ),
+        (
+            "POST",
+            "/api/v1/user/projects/mnist/training-requests/request-1/queue",
+            {},
+            None,
+        ),
+    ]
+
+
+def test_compute_and_job_methods_use_owner_project_paths() -> None:
+    seen_requests: list[tuple[str, str, dict[str, str]]] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen_requests.append(
+            (
+                request.method,
+                request.url.path,
+                dict(request.url.params.multi_items()),
+            )
+        )
+        if request.url.path.endswith("/compute-targets"):
+            return httpx.Response(
+                200,
+                json={
+                    "success": True,
+                    "data": [
+                        {
+                            "id": "ct-1",
+                            "name": "GPU",
+                            "kind": "dedicated",
+                            "type": "dedicated",
+                            "status": "active",
+                        }
+                    ],
+                },
+            )
+        if request.url.path.endswith("/jobs/job-1"):
+            return httpx.Response(
+                200,
+                json={
+                    "success": True,
+                    "data": {
+                        "id": "job-1",
+                        "trainingRequestId": "request-1",
+                        "projectSlug": "mnist",
+                        "computeTargetId": "ct-1",
+                        "status": "QUEUED",
+                    },
+                },
+            )
+        return httpx.Response(
+            200,
+            json={
+                "success": True,
+                "data": {
+                    "activeJobs": [],
+                    "queuedJobs": [
+                        {
+                            "id": "job-1",
+                            "trainingRequestId": "request-1",
+                            "projectSlug": "mnist",
+                            "computeTargetId": "ct-1",
+                            "status": "QUEUED",
+                        }
+                    ],
+                    "finishedJobs": [],
+                },
+            },
+        )
+
+    client = TreqsApiClient(
+        "https://api.treqs.ai",
+        http_client=httpx.Client(transport=httpx.MockTransport(handler)),
+    )
+    auth_state = AuthState(api_url="https://api.treqs.ai", access_token="access-token")
+
+    targets = client.list_compute_targets(
+        auth_state,
+        "/api/v1/user/compute-targets",
+        include_agent=True,
+    )
+    jobs = client.list_project_jobs(
+        auth_state,
+        "/api/v1/user/projects/mnist/jobs",
+        limit=20,
+        status="QUEUED",
+    )
+    job = client.get_project_job(
+        auth_state,
+        "/api/v1/user/projects/mnist/jobs/job-1",
+    )
+
+    assert targets[0].id == "ct-1"
+    assert jobs.queuedJobs[0].id == "job-1"
+    assert job.id == "job-1"
+    assert seen_requests == [
+        ("GET", "/api/v1/user/compute-targets", {"include": "agent"}),
+        ("GET", "/api/v1/user/projects/mnist/jobs", {"limit": "20", "status": "QUEUED"}),
+        ("GET", "/api/v1/user/projects/mnist/jobs/job-1", {}),
     ]
 
 

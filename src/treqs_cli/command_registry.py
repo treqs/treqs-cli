@@ -17,6 +17,8 @@ HELP_SECTION_ORDER: tuple[str, ...] = (
     "Start Here",
     "Project Context",
     "Training Requests",
+    "Compute",
+    "Jobs",
     "Account",
 )
 
@@ -56,6 +58,20 @@ COMMAND_SPECS: tuple[CommandSpec, ...] = (
         attr_name="requests_group",
         short_help="Manage training requests for the current TReqs project.",
         help_section="Training Requests",
+    ),
+    CommandSpec(
+        name="compute",
+        module_path="treqs_cli.commands.compute",
+        attr_name="compute_group",
+        short_help="Inspect compute resources for the current TReqs owner.",
+        help_section="Compute",
+    ),
+    CommandSpec(
+        name="jobs",
+        module_path="treqs_cli.commands.jobs",
+        attr_name="jobs_group",
+        short_help="Inspect jobs for the current TReqs project.",
+        help_section="Jobs",
     ),
     CommandSpec(
         name="logout",

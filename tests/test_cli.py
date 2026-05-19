@@ -9,12 +9,14 @@ from typing import Any
 
 from click.testing import CliRunner
 
-from treqs_cli.application.requests.models import TrainingRequest
+from treqs_cli.application.compute.models import ComputeTarget
+from treqs_cli.application.jobs.models import ProjectJobs, TrainingJob
+from treqs_cli.application.requests.models import TrainingRequest, TrainingRequestQueueResult
 from treqs_cli.cli import cli
 from treqs_cli.commands.shared import auth_state_for_request
 from treqs_cli.config import AuthStore, RepoContextStore
 from treqs_cli.context import TreqsContext
-from treqs_cli.models import AuthState, RepoContext
+from treqs_cli.models import AccessContext, AuthState, RepoContext
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 
@@ -62,7 +64,7 @@ def test_requests_commands_use_repo_project_context(
         )
     )
 
-    calls: list[tuple[str, str, object]] = []
+    calls: list[tuple[object, ...]] = []
 
     class FakeClient:
         def __init__(self, api_url: str) -> None:
@@ -90,11 +92,26 @@ def test_requests_commands_use_repo_project_context(
             self,
             auth_state: AuthState,
             path: str,
-            json_payload: dict[str, str],
+            json_payload: dict[str, object],
         ) -> TrainingRequest:
             calls.append(("create", path, json_payload))
             return TrainingRequest.model_validate(
                 {**_training_request_payload().model_dump(mode="json"), **json_payload}
+            )
+
+        def update_training_request(
+            self,
+            auth_state: AuthState,
+            path: str,
+            json_payload: dict[str, object],
+        ) -> TrainingRequest:
+            calls.append(("update", path, json_payload))
+            return TrainingRequest.model_validate(
+                {
+                    **_training_request_payload().model_dump(mode="json"),
+                    **json_payload,
+                    "id": "request-1",
+                }
             )
 
         def get_training_request(
@@ -104,6 +121,47 @@ def test_requests_commands_use_repo_project_context(
         ) -> TrainingRequest:
             calls.append(("show", path, auth_state.api_url))
             return _training_request_payload()
+
+        def open_training_request(
+            self,
+            auth_state: AuthState,
+            path: str,
+            json_payload: dict[str, object],
+        ) -> TrainingRequest:
+            calls.append(("open", path, json_payload))
+            return TrainingRequest.model_validate(
+                {
+                    **_training_request_payload().model_dump(mode="json"),
+                    **json_payload,
+                    "status": "open",
+                }
+            )
+
+        def queue_training_request(
+            self,
+            auth_state: AuthState,
+            path: str,
+        ) -> TrainingRequestQueueResult:
+            calls.append(("queue", path, auth_state.api_url))
+            return TrainingRequestQueueResult(
+                trainingRequest=TrainingRequest(
+                    id="request-1",
+                    title="Train model",
+                    status="queued",
+                    projectSlug="mnist",
+                ),
+                jobId="job-1",
+            )
+
+        def list_compute_targets(
+            self,
+            auth_state: AuthState,
+            path: str,
+            *,
+            include_agent: bool = False,
+        ) -> list[ComputeTarget]:
+            calls.append(("compute-targets", path, auth_state.api_url, include_agent))
+            return [ComputeTarget(id="ct-1", name="GPU", type="dedicated", kind="dedicated")]
 
     monkeypatch.setattr("treqs_cli.commands.requests.TreqsApiClient", FakeClient)
     monkeypatch.chdir(work_repo)
@@ -128,6 +186,8 @@ def test_requests_commands_use_repo_project_context(
             "Train a small model",
             "--workflow-path",
             ".github/workflows/train.yml",
+            "--workflow-snapshot-id",
+            "snapshot-1",
         ],
         env=env,
         catch_exceptions=False,
@@ -138,6 +198,44 @@ def test_requests_commands_use_repo_project_context(
         env=env,
         catch_exceptions=False,
     )
+    updated = runner.invoke(
+        cli,
+        [
+            "--json",
+            "requests",
+            "update",
+            "request-1",
+            "--title",
+            "Updated model",
+            "--clear-description",
+            "--clear-workflow-path",
+            "--clear-compute-target",
+            "--clear-workflow-snapshot",
+        ],
+        env=env,
+        catch_exceptions=False,
+    )
+    opened = runner.invoke(
+        cli,
+        [
+            "--json",
+            "requests",
+            "open",
+            "request-1",
+            "--workflow-path",
+            ".github/workflows/train.yml",
+            "--compute-target",
+            "GPU",
+        ],
+        env=env,
+        catch_exceptions=False,
+    )
+    queued = runner.invoke(
+        cli,
+        ["--json", "requests", "queue", "request-1"],
+        env=env,
+        catch_exceptions=False,
+    )
 
     assert listed.exit_code == 0, listed.output
     assert json.loads(listed.output)[0]["id"] == "request-1"
@@ -145,6 +243,12 @@ def test_requests_commands_use_repo_project_context(
     assert json.loads(created.output)["workflowPath"] == ".github/workflows/train.yml"
     assert shown.exit_code == 0, shown.output
     assert json.loads(shown.output)["id"] == "request-1"
+    assert updated.exit_code == 0, updated.output
+    assert json.loads(updated.output)["title"] == "Updated model"
+    assert opened.exit_code == 0, opened.output
+    assert json.loads(opened.output)["status"] == "open"
+    assert queued.exit_code == 0, queued.output
+    assert json.loads(queued.output)["jobId"] == "job-1"
     assert calls == [
         (
             "list",
@@ -159,6 +263,7 @@ def test_requests_commands_use_repo_project_context(
                 "description": "Train a small model",
                 "status": "draft",
                 "workflowPath": ".github/workflows/train.yml",
+                "workflowSnapshotId": "snapshot-1",
             },
         ),
         (
@@ -166,6 +271,208 @@ def test_requests_commands_use_repo_project_context(
             "/api/v1/user/projects/mnist/training-requests/request-1",
             "https://api.treqs.ai",
         ),
+        (
+            "update",
+            "/api/v1/user/projects/mnist/training-requests/request-1",
+            {
+                "title": "Updated model",
+                "description": None,
+                "workflowPath": None,
+                "computeSelection": {"targetId": None},
+                "workflowSnapshotId": None,
+            },
+        ),
+        ("compute-targets", "/api/v1/user/compute-targets", "https://api.treqs.ai", False),
+        (
+            "open",
+            "/api/v1/user/projects/mnist/training-requests/request-1/open",
+            {
+                "workflowPath": ".github/workflows/train.yml",
+                "computeSelection": {"targetId": "ct-1"},
+            },
+        ),
+        (
+            "queue",
+            "/api/v1/user/projects/mnist/training-requests/request-1/queue",
+            "https://api.treqs.ai",
+        ),
+    ]
+
+
+def test_compute_and_jobs_commands_use_repo_project_context(
+    monkeypatch: Any,
+    tmp_path: Path,
+) -> None:
+    config_home = tmp_path / "config"
+    work_repo = tmp_path / "repo"
+    work_repo.mkdir()
+    (work_repo / ".git").mkdir()
+    AuthStore(config_home / "auth.json").save(
+        AuthState(api_url="https://api.treqs.ai", access_token="access-token")
+    )
+    RepoContextStore(work_repo / ".treqs" / "config.toml").save(
+        RepoContext(
+            api_url="https://api.treqs.ai",
+            owner_id="owner-1",
+            owner_type="user",
+            owner_username="trevor",
+            owner_display_name="Trevor",
+            project_id="project-1",
+            project_slug="mnist",
+            project_name="MNIST",
+            current_username="trevor",
+        )
+    )
+
+    calls: list[tuple[str, str, object]] = []
+
+    class FakeClient:
+        def __init__(self, api_url: str) -> None:
+            self.api_url = api_url
+
+        def __enter__(self) -> FakeClient:
+            return self
+
+        def __exit__(self, *_exc: object) -> None:
+            return None
+
+        def list_compute_targets(
+            self,
+            auth_state: AuthState,
+            path: str,
+            *,
+            include_agent: bool = False,
+        ) -> list[ComputeTarget]:
+            calls.append(("targets", path, (auth_state.api_url, include_agent)))
+            return [ComputeTarget(id="ct-1", name="GPU", type="dedicated", kind="dedicated")]
+
+        def get_access_context(self, _auth_state: AuthState) -> AccessContext:
+            return AccessContext.model_validate(_access_context_payload())
+
+        def list_project_jobs(
+            self,
+            auth_state: AuthState,
+            path: str,
+            *,
+            limit: int,
+            status: str | None = None,
+        ) -> ProjectJobs:
+            calls.append(("jobs", path, (auth_state.api_url, limit, status)))
+            return ProjectJobs(
+                queuedJobs=[
+                    TrainingJob(
+                        id="job-1",
+                        trainingRequestId="request-1",
+                        projectSlug="mnist",
+                        computeTargetId="ct-1",
+                        status="QUEUED",
+                    )
+                ]
+            )
+
+        def get_project_job(
+            self,
+            auth_state: AuthState,
+            path: str,
+        ) -> TrainingJob:
+            calls.append(("job", path, auth_state.api_url))
+            return TrainingJob(
+                id="job-1",
+                trainingRequestId="request-1",
+                projectSlug="mnist",
+                computeTargetId="ct-1",
+                status="QUEUED",
+            )
+
+    monkeypatch.setattr("treqs_cli.commands.compute.TreqsApiClient", FakeClient)
+    monkeypatch.setattr("treqs_cli.commands.jobs.TreqsApiClient", FakeClient)
+    monkeypatch.setattr("treqs_cli.commands.shared.TreqsApiClient", FakeClient)
+    monkeypatch.chdir(work_repo)
+    runner = CliRunner()
+    env = {"TREQS_CONFIG_HOME": str(config_home)}
+
+    targets = runner.invoke(
+        cli,
+        ["--json", "compute", "targets", "list", "--include-agent"],
+        env=env,
+        catch_exceptions=False,
+    )
+    jobs = runner.invoke(
+        cli,
+        ["--json", "jobs", "list", "--status", "QUEUED"],
+        env=env,
+        catch_exceptions=False,
+    )
+    job = runner.invoke(
+        cli,
+        ["--json", "jobs", "show", "job-1"],
+        env=env,
+        catch_exceptions=False,
+    )
+
+    assert targets.exit_code == 0, targets.output
+    assert json.loads(targets.output)[0]["id"] == "ct-1"
+    assert jobs.exit_code == 0, jobs.output
+    assert json.loads(jobs.output)[0]["id"] == "job-1"
+    assert job.exit_code == 0, job.output
+    assert json.loads(job.output)["id"] == "job-1"
+    assert calls == [
+        ("targets", "/api/v1/user/compute-targets", ("https://api.treqs.ai", True)),
+        ("jobs", "/api/v1/user/projects/mnist/jobs", ("https://api.treqs.ai", 20, "QUEUED")),
+        ("job", "/api/v1/user/projects/mnist/jobs/job-1", "https://api.treqs.ai"),
+    ]
+
+
+def test_compute_targets_list_can_run_without_repo_context(
+    monkeypatch: Any,
+    tmp_path: Path,
+) -> None:
+    config_home = tmp_path / "config"
+    work_dir = tmp_path / "work"
+    work_dir.mkdir()
+    AuthStore(config_home / "auth.json").save(
+        AuthState(api_url="https://api.treqs.ai", access_token="access-token")
+    )
+    calls: list[tuple[str, str, object]] = []
+
+    class FakeClient:
+        def __init__(self, api_url: str) -> None:
+            self.api_url = api_url
+
+        def __enter__(self) -> FakeClient:
+            return self
+
+        def __exit__(self, *_exc: object) -> None:
+            return None
+
+        def get_access_context(self, _auth_state: AuthState) -> AccessContext:
+            return AccessContext.model_validate(_access_context_payload())
+
+        def list_compute_targets(
+            self,
+            auth_state: AuthState,
+            path: str,
+            *,
+            include_agent: bool = False,
+        ) -> list[ComputeTarget]:
+            calls.append(("targets", path, (auth_state.api_url, include_agent)))
+            return [ComputeTarget(id="ct-1", name="GPU", type="dedicated", kind="dedicated")]
+
+    monkeypatch.setattr("treqs_cli.commands.compute.TreqsApiClient", FakeClient)
+    monkeypatch.setattr("treqs_cli.commands.shared.TreqsApiClient", FakeClient)
+    monkeypatch.chdir(work_dir)
+    runner = CliRunner()
+    result = runner.invoke(
+        cli,
+        ["--json", "compute", "targets", "list", "--owner", "trevor"],
+        env={"TREQS_CONFIG_HOME": str(config_home)},
+        catch_exceptions=False,
+    )
+
+    assert result.exit_code == 0, result.output
+    assert json.loads(result.output)[0]["id"] == "ct-1"
+    assert calls == [
+        ("targets", "/api/v1/user/compute-targets", ("https://api.treqs.ai", False)),
     ]
 
 
@@ -178,6 +485,11 @@ def test_repo_local_commands_fail_clearly_outside_git_repo(tmp_path: Path) -> No
         ("requests", "list"),
         ("requests", "create", "--title", "Train model"),
         ("requests", "show", "request-1"),
+        ("requests", "update", "request-1", "--title", "Train model"),
+        ("requests", "open", "request-1", "--compute-target", "ct-1"),
+        ("requests", "queue", "request-1"),
+        ("jobs", "list"),
+        ("jobs", "show", "job-1"),
     ]
 
     for args in commands:
@@ -199,6 +511,37 @@ def _training_request_payload() -> TrainingRequest:
         createdAt="2026-01-01T00:00:00.000Z",
         updatedAt="2026-01-01T00:00:00.000Z",
     )
+
+
+def _access_context_payload() -> dict[str, object]:
+    return {
+        "user": {
+            "id": "user-1",
+            "sub": "sub-1",
+            "username": "trevor",
+            "email": "trevor@example.com",
+        },
+        "owners": [
+            {
+                "id": "user-1",
+                "type": "user",
+                "username": "trevor",
+                "display_name": "Trevor",
+                "role": "owner",
+            }
+        ],
+        "projects_by_owner": {
+            "user-1": [
+                {
+                    "id": "project-1",
+                    "slug": "mnist",
+                    "name": "MNIST",
+                    "visibility": "private",
+                    "can_write": True,
+                }
+            ]
+        },
+    }
 
 
 def _run_treqs_module(

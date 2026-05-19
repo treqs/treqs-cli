@@ -9,6 +9,9 @@ from treqs_cli.application.requests.models import (
     TrainingRequest,
     TrainingRequestCreateInput,
     TrainingRequestListFilters,
+    TrainingRequestOpenInput,
+    TrainingRequestQueueResult,
+    TrainingRequestUpdateInput,
     training_request_rows,
 )
 from treqs_cli.application.requests.service import TrainingRequestService
@@ -21,6 +24,8 @@ def test_create_input_builds_api_payload_and_forbids_unknown_fields() -> None:
         description="Train a small model",
         status="draft",
         workflow_path=".github/workflows/train.yml",
+        compute_target_id="ct-1",
+        workflow_snapshot_id="snapshot-1",
     )
 
     assert create_input.to_api_payload() == {
@@ -28,9 +33,27 @@ def test_create_input_builds_api_payload_and_forbids_unknown_fields() -> None:
         "description": "Train a small model",
         "status": "draft",
         "workflowPath": ".github/workflows/train.yml",
+        "computeSelection": {"targetId": "ct-1"},
+        "workflowSnapshotId": "snapshot-1",
     }
     with pytest.raises(ValidationError):
         TrainingRequestCreateInput.model_validate({"title": "Train model", "unexpected": "field"})
+
+
+def test_update_input_builds_clear_payload() -> None:
+    update_input = TrainingRequestUpdateInput(
+        clear_description=True,
+        clear_workflow_path=True,
+        clear_compute_target=True,
+        clear_workflow_snapshot=True,
+    )
+
+    assert update_input.to_api_payload() == {
+        "description": None,
+        "workflowPath": None,
+        "computeSelection": {"targetId": None},
+        "workflowSnapshotId": None,
+    }
 
 
 def test_response_dto_allows_additive_api_fields_and_table_rows() -> None:
@@ -76,11 +99,31 @@ def test_training_request_service_builds_owner_scoped_paths() -> None:
         TrainingRequestListFilters(statuses=("draft", "open"), limit=10, offset=5)
     )
     created = service.create(TrainingRequestCreateInput(title="Train model"))
+    updated = service.update(
+        "request-1",
+        TrainingRequestUpdateInput(
+            title="Updated model",
+            workflow_path=".github/workflows/train.yml",
+            compute_target_id="ct-1",
+            workflow_snapshot_id="snapshot-1",
+        ),
+    )
     fetched = service.get("request-1")
+    opened = service.open(
+        "request-1",
+        TrainingRequestOpenInput(
+            workflow_path=".github/workflows/train.yml",
+            compute_target_id="ct-1",
+        ),
+    )
+    queued = service.queue("request-1")
 
     assert listed[0].id == "request-1"
     assert created.id == "request-2"
+    assert updated.title == "Updated model"
     assert fetched.id == "request-1"
+    assert opened.status == "open"
+    assert queued.jobId == "job-1"
     assert client.calls == [
         (
             "list",
@@ -95,8 +138,30 @@ def test_training_request_service_builds_owner_scoped_paths() -> None:
             {"title": "Train model", "status": "draft"},
         ),
         (
+            "update",
+            "/api/v1/user/orgs/acme/projects/mnist/training-requests/request-1",
+            {
+                "title": "Updated model",
+                "workflowPath": ".github/workflows/train.yml",
+                "computeSelection": {"targetId": "ct-1"},
+                "workflowSnapshotId": "snapshot-1",
+            },
+        ),
+        (
             "get",
             "/api/v1/user/orgs/acme/projects/mnist/training-requests/request-1",
+        ),
+        (
+            "open",
+            "/api/v1/user/orgs/acme/projects/mnist/training-requests/request-1/open",
+            {
+                "workflowPath": ".github/workflows/train.yml",
+                "computeSelection": {"targetId": "ct-1"},
+            },
+        ),
+        (
+            "queue",
+            "/api/v1/user/orgs/acme/projects/mnist/training-requests/request-1/queue",
         ),
     ]
 
@@ -128,13 +193,29 @@ class _FakeTrainingRequestClient:
         self,
         _auth_state: AuthState,
         path: str,
-        json_payload: dict[str, str],
+        json_payload: dict[str, object],
     ) -> TrainingRequest:
         self.calls.append(("create", path, json_payload))
         return TrainingRequest(
             id="request-2",
-            title=json_payload["title"],
-            status=json_payload["status"],
+            title=str(json_payload["title"]),
+            status=str(json_payload["status"]),
+            projectSlug="mnist",
+        )
+
+    def update_training_request(
+        self,
+        _auth_state: AuthState,
+        path: str,
+        json_payload: dict[str, object],
+    ) -> TrainingRequest:
+        self.calls.append(("update", path, json_payload))
+        return TrainingRequest(
+            id="request-1",
+            title=str(json_payload["title"]),
+            status="draft",
+            workflowPath=str(json_payload["workflowPath"]),
+            computeSelection={"targetId": "ct-1"},
             projectSlug="mnist",
         )
 
@@ -149,4 +230,36 @@ class _FakeTrainingRequestClient:
             title="Train model",
             status="draft",
             projectSlug="mnist",
+        )
+
+    def open_training_request(
+        self,
+        _auth_state: AuthState,
+        path: str,
+        json_payload: dict[str, object],
+    ) -> TrainingRequest:
+        self.calls.append(("open", path, json_payload))
+        return TrainingRequest(
+            id="request-1",
+            title="Train model",
+            status="open",
+            workflowPath=str(json_payload["workflowPath"]),
+            computeSelection={"targetId": "ct-1"},
+            projectSlug="mnist",
+        )
+
+    def queue_training_request(
+        self,
+        _auth_state: AuthState,
+        path: str,
+    ) -> TrainingRequestQueueResult:
+        self.calls.append(("queue", path))
+        return TrainingRequestQueueResult(
+            trainingRequest=TrainingRequest(
+                id="request-1",
+                title="Train model",
+                status="queued",
+                projectSlug="mnist",
+            ),
+            jobId="job-1",
         )

@@ -6,7 +6,14 @@ from typing import Protocol
 
 from ...context import owner_path
 from ...models import AuthState, RepoContext
-from .models import TrainingRequest, TrainingRequestCreateInput, TrainingRequestListFilters
+from .models import (
+    TrainingRequest,
+    TrainingRequestCreateInput,
+    TrainingRequestListFilters,
+    TrainingRequestOpenInput,
+    TrainingRequestQueueResult,
+    TrainingRequestUpdateInput,
+)
 
 
 class TrainingRequestApi(Protocol):
@@ -24,7 +31,14 @@ class TrainingRequestApi(Protocol):
         self,
         auth_state: AuthState,
         path: str,
-        json_payload: dict[str, str],
+        json_payload: dict[str, object],
+    ) -> TrainingRequest: ...
+
+    def update_training_request(
+        self,
+        auth_state: AuthState,
+        path: str,
+        json_payload: dict[str, object],
     ) -> TrainingRequest: ...
 
     def get_training_request(
@@ -32,6 +46,19 @@ class TrainingRequestApi(Protocol):
         auth_state: AuthState,
         path: str,
     ) -> TrainingRequest: ...
+
+    def open_training_request(
+        self,
+        auth_state: AuthState,
+        path: str,
+        json_payload: dict[str, object],
+    ) -> TrainingRequest: ...
+
+    def queue_training_request(
+        self,
+        auth_state: AuthState,
+        path: str,
+    ) -> TrainingRequestQueueResult: ...
 
 
 @dataclass(frozen=True)
@@ -56,10 +83,34 @@ class TrainingRequestService:
             create_input.to_api_payload(),
         )
 
+    def update(
+        self,
+        request_id: str,
+        update_input: TrainingRequestUpdateInput,
+    ) -> TrainingRequest:
+        return self.client.update_training_request(
+            self.auth_state,
+            training_request_path(self.repo_context, request_id),
+            update_input.to_api_payload(),
+        )
+
     def get(self, request_id: str) -> TrainingRequest:
         return self.client.get_training_request(
             self.auth_state,
             training_request_path(self.repo_context, request_id),
+        )
+
+    def open(self, request_id: str, open_input: TrainingRequestOpenInput) -> TrainingRequest:
+        return self.client.open_training_request(
+            self.auth_state,
+            f"{training_request_path(self.repo_context, request_id)}/open",
+            open_input.to_api_payload(),
+        )
+
+    def queue(self, request_id: str) -> TrainingRequestQueueResult:
+        return self.client.queue_training_request(
+            self.auth_state,
+            f"{training_request_path(self.repo_context, request_id)}/queue",
         )
 
 

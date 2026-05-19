@@ -6,7 +6,9 @@ from typing import Any, cast
 
 import httpx
 
-from .application.requests.models import TrainingRequest
+from .application.compute.models import ComputeTarget
+from .application.jobs.models import ProjectJobs, TrainingJob
+from .application.requests.models import TrainingRequest, TrainingRequestQueueResult
 from .errors import ApiError, AuthError
 from .models import AccessContext, AuthState, DeviceAuthorizationSession
 
@@ -147,10 +149,24 @@ class TreqsApiClient:
         self,
         auth_state: AuthState,
         path: str,
-        json_payload: dict[str, str],
+        json_payload: dict[str, object],
     ) -> TrainingRequest:
         payload = self.request_json(
             "POST",
+            path,
+            auth_state=auth_state,
+            json_payload=json_payload,
+        )
+        return TrainingRequest.model_validate(_unwrap_data(payload))
+
+    def update_training_request(
+        self,
+        auth_state: AuthState,
+        path: str,
+        json_payload: dict[str, object],
+    ) -> TrainingRequest:
+        payload = self.request_json(
+            "PATCH",
             path,
             auth_state=auth_state,
             json_payload=json_payload,
@@ -164,6 +180,66 @@ class TreqsApiClient:
     ) -> TrainingRequest:
         payload = self.request_json("GET", path, auth_state=auth_state)
         return TrainingRequest.model_validate(_unwrap_data(payload))
+
+    def open_training_request(
+        self,
+        auth_state: AuthState,
+        path: str,
+        json_payload: dict[str, object],
+    ) -> TrainingRequest:
+        payload = self.request_json(
+            "POST",
+            path,
+            auth_state=auth_state,
+            json_payload=json_payload,
+        )
+        return TrainingRequest.model_validate(_unwrap_data(payload))
+
+    def queue_training_request(
+        self,
+        auth_state: AuthState,
+        path: str,
+    ) -> TrainingRequestQueueResult:
+        payload = self.request_json("POST", path, auth_state=auth_state)
+        return TrainingRequestQueueResult.model_validate(_unwrap_data(payload))
+
+    def list_compute_targets(
+        self,
+        auth_state: AuthState,
+        path: str,
+        *,
+        include_agent: bool = False,
+    ) -> list[ComputeTarget]:
+        params = {"include": "agent"} if include_agent else None
+        payload = self.request_json("GET", path, auth_state=auth_state, params=params)
+        return [ComputeTarget.model_validate(item) for item in _unwrap_list_data(payload)]
+
+    def list_project_jobs(
+        self,
+        auth_state: AuthState,
+        path: str,
+        *,
+        limit: int,
+        status: str | None = None,
+    ) -> ProjectJobs:
+        params: dict[str, Any] = {"limit": limit}
+        if status is not None:
+            params["status"] = status
+        payload = self.request_json(
+            "GET",
+            path,
+            auth_state=auth_state,
+            params=params,
+        )
+        return ProjectJobs.model_validate(_unwrap_data(payload))
+
+    def get_project_job(
+        self,
+        auth_state: AuthState,
+        path: str,
+    ) -> TrainingJob:
+        payload = self.request_json("GET", path, auth_state=auth_state)
+        return TrainingJob.model_validate(_unwrap_data(payload))
 
     def request_json(
         self,

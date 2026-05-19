@@ -21,6 +21,8 @@ def test_help_groups_are_built_from_command_specs() -> None:
     assert help_groups["Start Here"] == ("login", "whoami")
     assert help_groups["Project Context"] == ("projects", "project")
     assert help_groups["Training Requests"] == ("requests",)
+    assert help_groups["Compute"] == ("compute",)
+    assert help_groups["Jobs"] == ("jobs",)
     assert help_groups["Account"] == ("logout",)
 
 
@@ -35,10 +37,14 @@ def test_top_level_help_uses_registry_without_importing_command_modules() -> Non
     assert "Start Here:" in result.output
     assert "Project Context:" in result.output
     assert "Training Requests:" in result.output
+    assert "Compute:" in result.output
+    assert "Jobs:" in result.output
     assert "Account:" in result.output
     assert "Authenticate with TReqs using browser/device login." in result.output
     assert "Manage repo-local TReqs project context." in result.output
     assert "Manage training requests for the current TReqs project." in result.output
+    assert "Inspect compute resources for the current TReqs owner." in result.output
+    assert "Inspect jobs for the current TReqs project." in result.output
 
 
 def test_subcommand_help_reports_import_errors_cleanly() -> None:

@@ -1,8 +1,8 @@
 # treqs-cli
 
-`treqs-cli` is the command-line control plane for TReqs. This first slice focuses on
-authentication, identity, project discovery, repo-local project context, and training
-request basics.
+`treqs-cli` is the command-line control plane for TReqs. The current slice covers
+authentication, identity, project discovery, repo-local project context, training
+request lifecycle commands, compute target discovery, and project job inspection.
 
 ## Development
 
@@ -46,8 +46,15 @@ treqs projects list
 treqs project use <owner>/<project>
 treqs project status
 treqs requests list
-treqs requests create --title "Train MNIST"
+treqs requests create --title "Train MNIST" --workflow-snapshot-id <snapshot-id>
 treqs requests show <request-id>
+treqs requests update <request-id> --title "Train Fashion MNIST"
+treqs requests update <request-id> --clear-workflow-path --clear-compute-target
+treqs requests open <request-id> --workflow-path ".treqs/workflows/train.yaml" --compute-target <target>
+treqs requests queue <request-id>
+treqs compute targets list --owner <owner>
+treqs jobs list --status QUEUED
+treqs jobs show <job-id>
 ```
 
 The CLI stores global auth state under the platform config directory, or
