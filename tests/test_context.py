@@ -6,8 +6,9 @@ from pathlib import Path
 
 import pytest
 
-from treqs_cli.config import RepoContextStore, find_repo_root
+from treqs_cli.config import RepoContextStore, discover_repo_root, find_repo_root
 from treqs_cli.context import (
+    TreqsContext,
     build_repo_context,
     owner_base_path,
     owner_path,
@@ -59,6 +60,30 @@ def test_find_repo_root_uses_git_metadata_from_nested_directory(tmp_path: Path) 
     subprocess.run(["git", "init"], cwd=repo, check=True, capture_output=True)
 
     assert find_repo_root(nested) == repo.resolve()
+    discovery = discover_repo_root(nested)
+    assert discovery.root == repo.resolve()
+    assert discovery.is_git_repo is True
+
+
+def test_repo_discovery_marks_non_git_directory(tmp_path: Path) -> None:
+    nested = tmp_path / "plain" / "nested"
+    nested.mkdir(parents=True)
+
+    discovery = discover_repo_root(nested)
+
+    assert discovery.root == nested.resolve()
+    assert discovery.is_git_repo is False
+
+
+def test_treqs_context_records_repo_detection(tmp_path: Path) -> None:
+    context = TreqsContext.create(
+        api_url_override=None,
+        json_output=False,
+        cwd=tmp_path,
+    )
+
+    assert context.repo_root == tmp_path.resolve()
+    assert context.is_git_repo is False
 
 
 def test_repo_context_round_trip(tmp_path: Path) -> None:

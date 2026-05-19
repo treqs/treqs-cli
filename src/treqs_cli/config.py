@@ -4,6 +4,7 @@ import json
 import os
 import subprocess
 from contextlib import suppress
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -20,6 +21,12 @@ from .errors import AuthError, ConfigError
 from .models import AuthState, RepoContext
 
 DEFAULT_API_URL = "https://api.treqs.ai"
+
+
+@dataclass(frozen=True)
+class RepoDiscovery:
+    root: Path
+    is_git_repo: bool
 
 
 def config_home() -> Path:
@@ -85,7 +92,7 @@ class AuthStore:
         return True
 
 
-def find_repo_root(start: Path | None = None) -> Path:
+def discover_repo_root(start: Path | None = None) -> RepoDiscovery:
     current = (start or Path.cwd()).resolve()
     try:
         out = subprocess.check_output(
@@ -95,14 +102,18 @@ def find_repo_root(start: Path | None = None) -> Path:
             text=True,
         ).strip()
         if out:
-            return Path(out).resolve()
+            return RepoDiscovery(root=Path(out).resolve(), is_git_repo=True)
     except (subprocess.CalledProcessError, FileNotFoundError, OSError):
         pass
 
     for candidate in [current, *current.parents]:
         if (candidate / ".git").exists():
-            return candidate
-    return current
+            return RepoDiscovery(root=candidate, is_git_repo=True)
+    return RepoDiscovery(root=current, is_git_repo=False)
+
+
+def find_repo_root(start: Path | None = None) -> Path:
+    return discover_repo_root(start).root
 
 
 def repo_config_path(start: Path | None = None) -> Path:

@@ -1,217 +1,178 @@
 from __future__ import annotations
 
+from collections.abc import Iterable
+from importlib import import_module
+from typing import Any
+
 import click
 
 from . import __version__
-from .api import TreqsApiClient, ensure_fresh_auth
-from .auth import open_browser, resolve_api_url
-from .context import TreqsContext, build_repo_context, project_scope, resolve_project_selection
-from .errors import ApiError, TreqsCliError
-from .models import AccessContext, AccessOwner, AccessProject, AuthState
-from .output import emit_json, render_table
+from .command_registry import COMMAND_SPECS, build_help_groups, build_lazy_commands
+from .errors import TreqsCliError
+
+LAZY_COMMANDS: dict[str, tuple[str, str, str, bool]] = build_lazy_commands()
+HELP_GROUPS: tuple[tuple[str, tuple[str, ...]], ...] = build_help_groups()
 
 
-@click.group()
+class _LazyTreqsContext:
+    def __init__(self, *, api_url_override: str | None, json_output: bool) -> None:
+        self._api_url_override = api_url_override
+        self._json_output = json_output
+        self._context: Any | None = None
+
+    def _load(self) -> Any:
+        if self._context is None:
+            from .context import TreqsContext
+
+            self._context = TreqsContext.create(
+                api_url_override=self._api_url_override,
+                json_output=self._json_output,
+            )
+        return self._context
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._load(), name)
+
+
+class LazyCommand(click.Command):
+    def __init__(
+        self,
+        name: str,
+        module_path: str,
+        attr_name: str,
+        short_help: str,
+        hidden: bool = False,
+    ) -> None:
+        super().__init__(name=name, callback=None, help=short_help, hidden=hidden)
+        self._module_path = module_path
+        self._attr_name = attr_name
+        self._real_command: click.Command | None = None
+
+    def _load(self) -> click.Command:
+        if self._real_command is None:
+            try:
+                module = import_module(self._module_path)
+            except ModuleNotFoundError as exc:
+                missing = exc.name or "unknown"
+                raise click.ClickException(
+                    f"Failed to load '{self.name}' because import '{missing}' is unavailable. "
+                    "Install treqs-cli with its dependencies or run from the project virtualenv."
+                ) from exc
+            except ImportError as exc:
+                raise click.ClickException(f"Failed to load '{self.name}': {exc}") from exc
+            command = getattr(module, self._attr_name)
+            if not isinstance(command, click.Command):
+                raise click.ClickException(
+                    f"Failed to load '{self.name}': {self._module_path}.{self._attr_name} "
+                    "is not a Click command."
+                )
+            self._real_command = command
+        return self._real_command
+
+    def invoke(self, ctx: click.Context) -> Any:
+        return self._load().invoke(ctx)
+
+    def get_help(self, ctx: click.Context) -> str:
+        return self._load().get_help(ctx)
+
+    def get_params(self, ctx: click.Context) -> list[click.Parameter]:
+        return self._load().get_params(ctx)
+
+    def make_context(
+        self,
+        info_name: str | None,
+        args: list[str],
+        parent: click.Context | None = None,
+        **extra: Any,
+    ) -> click.Context:
+        return self._load().make_context(info_name, args, parent=parent, **extra)
+
+
+class LazyGroup(click.Group):
+    def __init__(
+        self,
+        *args: Any,
+        lazy_commands: dict[str, tuple[str, str, str, bool]] | None = None,
+        **kwargs: Any,
+    ) -> None:
+        super().__init__(*args, **kwargs)
+        self._lazy_commands = lazy_commands or {}
+        for name, (module_path, attr_name, short_help, hidden) in self._lazy_commands.items():
+            self.add_command(
+                LazyCommand(name, module_path, attr_name, short_help, hidden),
+                name,
+            )
+
+    def list_commands(self, ctx: click.Context) -> list[str]:
+        return sorted(super().list_commands(ctx))
+
+    def format_commands(self, ctx: click.Context, formatter: click.HelpFormatter) -> None:
+        rendered_commands: set[str] = set()
+
+        for section_name, command_names in HELP_GROUPS:
+            rows = self._command_rows(ctx, formatter, command_names)
+            if not rows:
+                continue
+            rendered_commands.update(name for name, _help in rows)
+            with formatter.section(section_name):
+                formatter.write_dl(rows)
+
+        remaining = [name for name in self.list_commands(ctx) if name not in rendered_commands]
+        rows = self._command_rows(ctx, formatter, remaining)
+        if rows:
+            with formatter.section("Other Commands"):
+                formatter.write_dl(rows)
+
+    def _command_rows(
+        self,
+        ctx: click.Context,
+        formatter: click.HelpFormatter,
+        command_names: Iterable[str],
+    ) -> list[tuple[str, str]]:
+        commands: list[tuple[str, click.Command]] = []
+        max_name_len = 0
+
+        for command_name in command_names:
+            command = self.get_command(ctx, command_name)
+            if command is None or command.hidden:
+                continue
+            commands.append((command_name, command))
+            max_name_len = max(max_name_len, len(command_name))
+
+        if not commands:
+            return []
+
+        help_limit = formatter.width - 6 - max_name_len
+        return [
+            (command_name, command.get_short_help_str(help_limit))
+            for command_name, command in commands
+        ]
+
+
+@click.command(cls=LazyGroup, lazy_commands=LAZY_COMMANDS)
 @click.version_option(version=__version__, prog_name="treqs")
 @click.option("--api-url", envvar="TREQS_API_URL", help="TReqs API base URL.")
 @click.option("--json", "json_output", is_flag=True, help="Emit machine-readable JSON.")
 @click.pass_context
 def cli(ctx: click.Context, api_url: str | None, json_output: bool) -> None:
     """TReqs command-line control plane."""
-    ctx.obj = TreqsContext.create(api_url_override=api_url, json_output=json_output)
-
-
-@cli.command("login")
-@click.option("--force", is_flag=True, help="Replace an existing login without prompting.")
-@click.option("--no-browser", is_flag=True, help="Do not try to open a browser automatically.")
-@click.pass_obj
-def login_command(state: TreqsContext, force: bool, no_browser: bool) -> None:
-    """Authenticate with TReqs using browser/device login."""
-    api_url = resolve_api_url(state.api_url_override)
-    existing = state.auth_store.load()
-    if existing is not None and not force:
-        identity = existing.user.username if existing.user else "existing session"
-        click.echo(f"Already logged in as {identity}.")
-        if not click.confirm("Replace existing session?", default=False):
-            raise click.ClickException("Login cancelled; existing session preserved.")
-
-    with TreqsApiClient(api_url) as client:
-        session = client.start_device_authorization()
-        verification_url = session.verification_uri_complete or session.verification_uri
-        click.echo("Starting TReqs device login.")
-        click.echo(f"Open this URL: {verification_url}")
-        click.echo(f"Enter this code: {session.user_code}")
-        if open_browser(verification_url, disabled=no_browser):
-            click.echo("Opened browser for approval.")
-        else:
-            click.echo("Waiting for browser approval.")
-        auth_state = client.poll_device_token(session)
-
-    path = state.auth_store.save(auth_state)
-    if state.json_output:
-        emit_json({"auth": auth_state, "path": str(path)})
-        return
-
-    identity = auth_state.user.username if auth_state.user else "authenticated user"
-    click.echo(f"Logged in as {identity}.")
-    click.echo(f"Saved auth state to {path}.")
-
-
-@cli.command("logout")
-@click.pass_obj
-def logout_command(state: TreqsContext) -> None:
-    """Clear local TReqs auth state and revoke the session when possible."""
-    auth_state = state.auth_store.load()
-    if auth_state is not None:
-        try:
-            auth_state_for_request = _auth_state_for_request(state, auth_state)
-            with TreqsApiClient(auth_state_for_request.api_url) as client:
-                client.logout(auth_state_for_request)
-        except ApiError:
-            pass
-    removed = state.auth_store.delete()
-    if state.json_output:
-        emit_json({"removed": removed})
-    else:
-        click.echo("Logged out." if removed else "No stored login found.")
-
-
-@cli.command("whoami")
-@click.pass_obj
-def whoami_command(state: TreqsContext) -> None:
-    """Show the authenticated TReqs user and owner access summary."""
-    auth_state, access_context = _load_access_context(state)
-    if state.json_output:
-        emit_json({"auth": auth_state, "access_context": access_context})
-        return
-
-    user = access_context.user
-    project_count = sum(len(projects) for projects in access_context.projects_by_owner.values())
-    click.echo(f"{user.username} <{user.email}>")
-    click.echo(f"User ID: {user.id}")
-    click.echo(f"API: {auth_state.api_url}")
-    click.echo(f"Owners: {len(access_context.owners)}")
-    click.echo(f"Projects: {project_count}")
-
-
-@cli.group("projects")
-def projects_group() -> None:
-    """List accessible TReqs projects."""
-
-
-@projects_group.command("list")
-@click.pass_obj
-def projects_list_command(state: TreqsContext) -> None:
-    """List projects available to the authenticated user."""
-    _auth_state, access_context = _load_access_context(state)
-    rows = _project_rows(access_context)
-    if state.json_output:
-        emit_json(rows)
-        return
-    render_table(
-        rows,
-        [
-            ("scope", "SCOPE"),
-            ("name", "NAME"),
-            ("visibility", "VISIBILITY"),
-            ("write", "WRITE"),
-        ],
-    )
-
-
-@cli.group("project")
-def project_group() -> None:
-    """Manage repo-local TReqs project context."""
-
-
-@project_group.command("use")
-@click.argument("selection")
-@click.pass_obj
-def project_use_command(state: TreqsContext, selection: str) -> None:
-    """Set this repo's TReqs project context."""
-    auth_state, access_context = _load_access_context(state)
-    owner, project = resolve_project_selection(access_context, selection)
-    repo_context = build_repo_context(
-        auth_state=auth_state,
-        access_context=access_context,
-        owner=owner,
-        project=project,
-    )
-    path = state.repo_context_store.save(repo_context)
-
-    if state.json_output:
-        emit_json({"context": repo_context, "path": str(path)})
-        return
-
-    click.echo(f"Using TReqs project {project_scope(owner, project)}.")
-    click.echo(f"Saved to {path}.")
-
-
-@project_group.command("status")
-@click.pass_obj
-def project_status_command(state: TreqsContext) -> None:
-    """Show the repo-local TReqs project context."""
-    context = state.repo_context_store.require()
-    if state.json_output:
-        emit_json(context)
-        return
-    click.echo(f"Project: {context.owner_username}/{context.project_slug}")
-    click.echo(f"Name: {context.project_name}")
-    click.echo(f"Owner: {context.owner_display_name or context.owner_username}")
-    click.echo(f"API: {context.api_url}")
-
-
-@project_group.command("clear")
-@click.pass_obj
-def project_clear_command(state: TreqsContext) -> None:
-    """Clear the repo-local TReqs project context."""
-    removed = state.repo_context_store.clear()
-    if state.json_output:
-        emit_json({"removed": removed})
-    else:
-        click.echo("Cleared TReqs project context." if removed else "No project context found.")
+    ctx.obj = _LazyTreqsContext(api_url_override=api_url, json_output=json_output)
 
 
 def main() -> None:
     try:
         cli()
     except TreqsCliError as exc:
-        raise click.ClickException(str(exc)) from exc
+        click.ClickException(str(exc)).show()
+        raise SystemExit(1) from exc
 
 
-def _load_access_context(state: TreqsContext) -> tuple[AuthState, AccessContext]:
-    auth_state = ensure_fresh_auth(
-        state.auth_store,
-        _auth_state_for_request(state, state.auth_store.require()),
-    )
-    with TreqsApiClient(auth_state.api_url) as client:
-        access_context = client.get_access_context(auth_state)
-    return auth_state, access_context
-
-
-def _auth_state_for_request(state: TreqsContext, auth_state: AuthState) -> AuthState:
-    if state.api_url_override is None:
-        return auth_state
-    return auth_state.model_copy(update={"api_url": resolve_api_url(state.api_url_override)})
-
-
-def _project_rows(access_context: AccessContext) -> list[dict[str, str]]:
-    rows: list[dict[str, str]] = []
-    owners_by_id = access_context.owner_by_id()
-    for owner_id, projects in access_context.projects_by_owner.items():
-        owner = owners_by_id.get(owner_id)
-        if owner is None:
-            continue
-        for project in projects:
-            rows.append(_project_row(owner, project))
-    rows.sort(key=lambda row: row["scope"])
-    return rows
-
-
-def _project_row(owner: AccessOwner, project: AccessProject) -> dict[str, str]:
-    return {
-        "scope": project_scope(owner, project),
-        "name": project.name,
-        "visibility": project.visibility,
-        "write": "yes" if project.can_write else "no",
-    }
+__all__ = [
+    "COMMAND_SPECS",
+    "HELP_GROUPS",
+    "LAZY_COMMANDS",
+    "LazyCommand",
+    "LazyGroup",
+    "cli",
+    "main",
+]

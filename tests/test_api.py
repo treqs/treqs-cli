@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import json
+
 import httpx
 
 from treqs_cli.api import TreqsApiClient
@@ -213,6 +215,95 @@ def test_refresh_auth_preserves_existing_session_fields_when_response_is_sparse(
     assert refreshed.provider == "github"
     assert refreshed.user is not None
     assert refreshed.user.username == "trevor"
+
+
+def test_training_request_methods_use_project_paths_and_payloads() -> None:
+    seen_requests: list[tuple[str, str, dict[str, str], object | None]] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        body = json.loads(request.content.decode("utf-8")) if request.content else None
+        seen_requests.append(
+            (
+                request.method,
+                request.url.path,
+                dict(request.url.params.multi_items()),
+                body,
+            )
+        )
+        if request.method == "GET" and request.url.path.endswith("/training-requests"):
+            return httpx.Response(
+                200,
+                json={
+                    "success": True,
+                    "data": [
+                        {
+                            "id": "request-1",
+                            "title": "Train model",
+                            "status": "draft",
+                            "projectSlug": "mnist",
+                        }
+                    ],
+                },
+            )
+        return httpx.Response(
+            200,
+            json={
+                "success": True,
+                "data": {
+                    "id": "request-1",
+                    "title": "Train model",
+                    "status": "draft",
+                    "projectSlug": "mnist",
+                },
+            },
+        )
+
+    client = TreqsApiClient(
+        "https://api.treqs.ai",
+        http_client=httpx.Client(transport=httpx.MockTransport(handler)),
+    )
+    auth_state = AuthState(api_url="https://api.treqs.ai", access_token="access-token")
+
+    listed = client.list_training_requests(
+        auth_state,
+        "/api/v1/user/projects/mnist/training-requests",
+        statuses=("draft", "open"),
+        limit=10,
+        offset=5,
+    )
+    created = client.create_training_request(
+        auth_state,
+        "/api/v1/user/projects/mnist/training-requests",
+        {"title": "Train model", "status": "draft"},
+    )
+    fetched = client.get_training_request(
+        auth_state,
+        "/api/v1/user/projects/mnist/training-requests/request-1",
+    )
+
+    assert listed[0].id == "request-1"
+    assert created.id == "request-1"
+    assert fetched.id == "request-1"
+    assert seen_requests == [
+        (
+            "GET",
+            "/api/v1/user/projects/mnist/training-requests",
+            {"status": "draft,open", "limit": "10", "offset": "5"},
+            None,
+        ),
+        (
+            "POST",
+            "/api/v1/user/projects/mnist/training-requests",
+            {},
+            {"title": "Train model", "status": "draft"},
+        ),
+        (
+            "GET",
+            "/api/v1/user/projects/mnist/training-requests/request-1",
+            {},
+            None,
+        ),
+    ]
 
 
 def _access_context_payload() -> dict[str, object]:

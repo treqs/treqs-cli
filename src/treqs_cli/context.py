@@ -5,7 +5,7 @@ import sys
 from dataclasses import dataclass
 from pathlib import Path
 
-from .config import AuthStore, RepoContextStore, find_repo_root
+from .config import AuthStore, RepoContextStore, discover_repo_root
 from .errors import ConfigError
 from .models import AccessContext, AccessOwner, AccessProject, AuthState, RepoContext
 
@@ -21,6 +21,7 @@ class TreqsContext:
     cwd: Path
     repo_root: Path
     is_interactive: bool
+    is_git_repo: bool = False
 
     @classmethod
     def create(
@@ -31,15 +32,16 @@ class TreqsContext:
         cwd: Path | None = None,
     ) -> TreqsContext:
         resolved_cwd = (cwd or Path.cwd()).resolve()
-        repo_root = find_repo_root(resolved_cwd)
+        repo_discovery = discover_repo_root(resolved_cwd)
         return cls(
             api_url_override=api_url_override,
             json_output=json_output,
             auth_store=AuthStore(),
             repo_context_store=RepoContextStore(start=resolved_cwd),
             cwd=resolved_cwd,
-            repo_root=repo_root,
+            repo_root=repo_discovery.root,
             is_interactive=sys.stdin.isatty(),
+            is_git_repo=repo_discovery.is_git_repo,
         )
 
 

@@ -1,11 +1,12 @@
 from __future__ import annotations
 
 import time
-from collections.abc import Callable
-from typing import Any
+from collections.abc import Callable, Sequence
+from typing import Any, cast
 
 import httpx
 
+from .application.requests.models import TrainingRequest
 from .errors import ApiError, AuthError
 from .models import AccessContext, AuthState, DeviceAuthorizationSession
 
@@ -117,6 +118,53 @@ class TreqsApiClient:
             payload = self.request_json("GET", "/api/v1/user/access-context", auth_state=auth_state)
         return AccessContext.model_validate(_unwrap_data(payload))
 
+    def list_training_requests(
+        self,
+        auth_state: AuthState,
+        path: str,
+        *,
+        statuses: Sequence[str] | None = None,
+        limit: int | None = None,
+        offset: int | None = None,
+    ) -> list[TrainingRequest]:
+        params: dict[str, Any] = {}
+        if statuses:
+            params["status"] = ",".join(statuses)
+        if limit is not None:
+            params["limit"] = limit
+        if offset is not None:
+            params["offset"] = offset
+
+        payload = self.request_json(
+            "GET",
+            path,
+            auth_state=auth_state,
+            params=params or None,
+        )
+        return [TrainingRequest.model_validate(item) for item in _unwrap_list_data(payload)]
+
+    def create_training_request(
+        self,
+        auth_state: AuthState,
+        path: str,
+        json_payload: dict[str, str],
+    ) -> TrainingRequest:
+        payload = self.request_json(
+            "POST",
+            path,
+            auth_state=auth_state,
+            json_payload=json_payload,
+        )
+        return TrainingRequest.model_validate(_unwrap_data(payload))
+
+    def get_training_request(
+        self,
+        auth_state: AuthState,
+        path: str,
+    ) -> TrainingRequest:
+        payload = self.request_json("GET", path, auth_state=auth_state)
+        return TrainingRequest.model_validate(_unwrap_data(payload))
+
     def request_json(
         self,
         method: str,
@@ -124,6 +172,7 @@ class TreqsApiClient:
         *,
         auth_state: AuthState | None = None,
         json_payload: dict[str, Any] | None = None,
+        params: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         headers = {"Accept": "application/json"}
         if auth_state is not None:
@@ -135,6 +184,7 @@ class TreqsApiClient:
                 method,
                 f"{self.api_url}{path}",
                 json=json_payload,
+                params=params,
                 headers=headers,
             )
         except httpx.HTTPError as exc:
@@ -200,6 +250,20 @@ def _unwrap_data(payload: dict[str, Any]) -> dict[str, Any]:
     if not isinstance(data, dict):
         raise ApiError("TReqs API response is missing object data.")
     return data
+
+
+def _unwrap_list_data(payload: dict[str, Any]) -> list[dict[str, Any]]:
+    if payload.get("success") is not True:
+        raise ApiError(_error_message(payload, None))
+    data = payload.get("data")
+    if not isinstance(data, list):
+        raise ApiError("TReqs API response is missing list data.")
+    items: list[dict[str, Any]] = []
+    for item in data:
+        if not isinstance(item, dict):
+            raise ApiError("TReqs API list response contains a non-object item.")
+        items.append(cast(dict[str, Any], item))
+    return items
 
 
 def _error_message(payload: Any, status_code: int | None) -> str:
