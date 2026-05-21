@@ -45,13 +45,13 @@ treqs whoami
 treqs projects list
 treqs project use <owner>/<project>
 treqs project status
-treqs requests list
-treqs requests create --title "Train MNIST" --workflow-snapshot-id <snapshot-id>
-treqs requests show <request-id>
-treqs requests update <request-id> --title "Train Fashion MNIST"
-treqs requests update <request-id> --clear-workflow-path --clear-compute-target
-treqs requests open <request-id> --workflow-path ".treqs/workflows/train.yaml" --compute-target <target>
-treqs requests queue <request-id>
+treqs tr list
+treqs tr create --title "Train MNIST" --workflow-snapshot-id <snapshot-id>
+treqs tr show <request-id>
+treqs tr update <request-id> --title "Train Fashion MNIST"
+treqs tr update <request-id> --clear-workflow-path --clear-compute-target
+treqs tr open <request-id> --workflow-path ".treqs/workflows/train.yaml" --compute-target <target>
+treqs tr queue <request-id>
 treqs compute targets list --owner <owner>
 treqs jobs list --status QUEUED
 treqs jobs show <job-id>

@@ -20,7 +20,7 @@ def test_help_groups_are_built_from_command_specs() -> None:
 
     assert help_groups["Start Here"] == ("login", "whoami")
     assert help_groups["Project Context"] == ("projects", "project")
-    assert help_groups["Training Requests"] == ("requests",)
+    assert help_groups["Training Requests"] == ("tr",)
     assert help_groups["Compute"] == ("compute",)
     assert help_groups["Jobs"] == ("jobs",)
     assert help_groups["Account"] == ("logout",)
@@ -51,14 +51,14 @@ def test_subcommand_help_reports_import_errors_cleanly() -> None:
     runner = CliRunner()
     missing = ModuleNotFoundError("No module named 'httpx'")
     missing.name = "httpx"
-    command = cast(click.Group, cli).commands["requests"]
+    command = cast(click.Group, cli).commands["tr"]
     assert isinstance(command, LazyCommand)
     command._real_command = None
 
     with patch("treqs_cli.cli.import_module", side_effect=missing):
-        result = runner.invoke(cli, ["requests", "--help"])
+        result = runner.invoke(cli, ["tr", "--help"])
 
     assert result.exit_code != 0
-    assert "Failed to load 'requests'" in result.output
+    assert "Failed to load 'tr'" in result.output
     assert "httpx" in result.output
     assert "Traceback" not in result.output

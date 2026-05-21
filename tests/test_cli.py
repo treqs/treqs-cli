@@ -170,7 +170,7 @@ def test_requests_commands_use_repo_project_context(
 
     listed = runner.invoke(
         cli,
-        ["--json", "requests", "list", "--status", "draft", "--limit", "10"],
+        ["--json", "tr", "list", "--status", "draft", "--limit", "10"],
         env=env,
         catch_exceptions=False,
     )
@@ -178,7 +178,7 @@ def test_requests_commands_use_repo_project_context(
         cli,
         [
             "--json",
-            "requests",
+            "tr",
             "create",
             "--title",
             "Train model",
@@ -194,7 +194,7 @@ def test_requests_commands_use_repo_project_context(
     )
     shown = runner.invoke(
         cli,
-        ["--json", "requests", "show", "request-1"],
+        ["--json", "tr", "show", "request-1"],
         env=env,
         catch_exceptions=False,
     )
@@ -202,7 +202,7 @@ def test_requests_commands_use_repo_project_context(
         cli,
         [
             "--json",
-            "requests",
+            "tr",
             "update",
             "request-1",
             "--title",
@@ -219,7 +219,7 @@ def test_requests_commands_use_repo_project_context(
         cli,
         [
             "--json",
-            "requests",
+            "tr",
             "open",
             "request-1",
             "--workflow-path",
@@ -232,7 +232,7 @@ def test_requests_commands_use_repo_project_context(
     )
     queued = runner.invoke(
         cli,
-        ["--json", "requests", "queue", "request-1"],
+        ["--json", "tr", "queue", "request-1"],
         env=env,
         catch_exceptions=False,
     )
@@ -482,12 +482,12 @@ def test_repo_local_commands_fail_clearly_outside_git_repo(tmp_path: Path) -> No
         ("project", "use", "trevor/mnist"),
         ("project", "status"),
         ("project", "clear"),
-        ("requests", "list"),
-        ("requests", "create", "--title", "Train model"),
-        ("requests", "show", "request-1"),
-        ("requests", "update", "request-1", "--title", "Train model"),
-        ("requests", "open", "request-1", "--compute-target", "ct-1"),
-        ("requests", "queue", "request-1"),
+        ("tr", "list"),
+        ("tr", "create", "--title", "Train model"),
+        ("tr", "show", "request-1"),
+        ("tr", "update", "request-1", "--title", "Train model"),
+        ("tr", "open", "request-1", "--compute-target", "ct-1"),
+        ("tr", "queue", "request-1"),
         ("jobs", "list"),
         ("jobs", "show", "job-1"),
     ]

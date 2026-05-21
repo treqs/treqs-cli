@@ -53,7 +53,7 @@ COMMAND_SPECS: tuple[CommandSpec, ...] = (
         help_section="Project Context",
     ),
     CommandSpec(
-        name="requests",
+        name="tr",
         module_path="treqs_cli.commands.requests",
         attr_name="requests_group",
         short_help="Manage training requests for the current TReqs project.",
