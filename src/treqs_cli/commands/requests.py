@@ -23,7 +23,7 @@ from ..output import emit_json, render_table
 from .shared import load_project_api_context
 
 
-@click.group("requests")
+@click.group("tr")
 def requests_group() -> None:
     """Manage training requests for the current TReqs project."""
 
