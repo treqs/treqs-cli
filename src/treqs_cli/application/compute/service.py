@@ -6,7 +6,12 @@ from typing import Protocol
 
 from ...context import owner_path
 from ...models import AuthState, RepoContext
-from .models import ComputeTarget
+from .models import (
+    ComputeTarget,
+    ComputeTargetCreateInput,
+    RegistrationCode,
+    SecretInput,
+)
 
 
 class ComputeTargetApi(Protocol):
@@ -17,6 +22,26 @@ class ComputeTargetApi(Protocol):
         *,
         include_agent: bool = False,
     ) -> list[ComputeTarget]: ...
+
+    def create_compute_target(
+        self,
+        auth_state: AuthState,
+        path: str,
+        json_payload: dict[str, object],
+    ) -> ComputeTarget: ...
+
+    def set_compute_target_secret(
+        self,
+        auth_state: AuthState,
+        path: str,
+        json_payload: dict[str, object],
+    ) -> None: ...
+
+    def create_registration_code(
+        self,
+        auth_state: AuthState,
+        path: str,
+    ) -> RegistrationCode: ...
 
 
 @dataclass(frozen=True)
@@ -38,6 +63,26 @@ class ComputeTargetService:
             include_agent=include_agent,
         )
 
+    def create(self, create_input: ComputeTargetCreateInput) -> ComputeTarget:
+        return self.client.create_compute_target(
+            self.auth_state,
+            compute_targets_path(self.scope),
+            create_input.to_api_payload(),
+        )
+
+    def set_secret(self, target_id: str, secret: SecretInput) -> None:
+        self.client.set_compute_target_secret(
+            self.auth_state,
+            compute_target_secrets_path(self.scope, target_id),
+            secret.to_api_payload(),
+        )
+
+    def create_registration_code(self, target_id: str) -> RegistrationCode:
+        return self.client.create_registration_code(
+            self.auth_state,
+            registration_codes_path(self.scope, target_id),
+        )
+
 
 def compute_targets_path(scope: ComputeTargetScope | RepoContext) -> str:
     return owner_path(
@@ -45,6 +90,24 @@ def compute_targets_path(scope: ComputeTargetScope | RepoContext) -> str:
         scope.current_username,
         "/compute-targets",
     )
+
+
+def compute_target_path(scope: ComputeTargetScope | RepoContext, target_id: str) -> str:
+    return f"{compute_targets_path(scope)}/{target_id}"
+
+
+def compute_target_secrets_path(
+    scope: ComputeTargetScope | RepoContext,
+    target_id: str,
+) -> str:
+    return f"{compute_target_path(scope, target_id)}/secrets"
+
+
+def registration_codes_path(
+    scope: ComputeTargetScope | RepoContext,
+    target_id: str,
+) -> str:
+    return f"{compute_target_path(scope, target_id)}/agent/registration-codes"
 
 
 def resolve_compute_target_id(

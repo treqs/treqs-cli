@@ -1,8 +1,29 @@
 from __future__ import annotations
 
+from typing import cast
+
 import click
 
-from ..context import TreqsContext, build_repo_context, project_scope, resolve_project_selection
+from ..api import TreqsApiClient
+from ..application.projects.models import (
+    PROJECT_VISIBILITIES,
+    GitHubAccessMode,
+    ProjectCreateInput,
+    ProjectVisibility,
+    parse_code_config,
+    slugify_name,
+    validate_slug,
+)
+from ..application.projects.service import ProjectScope, ProjectService
+from ..context import (
+    TreqsContext,
+    build_repo_context,
+    current_user_owner,
+    project_scope,
+    resolve_owner_selection,
+    resolve_project_selection,
+)
+from ..errors import ConfigError
 from ..models import AccessContext, AccessOwner, AccessProject
 from ..output import emit_json, render_table
 from .shared import load_access_context, require_git_repo
@@ -31,6 +52,76 @@ def projects_list_command(state: TreqsContext) -> None:
             ("write", "WRITE"),
         ],
     )
+
+
+@projects_group.command("create")
+@click.argument("name")
+@click.option("--slug", help="Project slug. Defaults to a slugified name.")
+@click.option(
+    "--visibility",
+    type=click.Choice(PROJECT_VISIBILITIES),
+    default="private",
+    show_default=True,
+    help="Project visibility.",
+)
+@click.option("--description", help="Project description.")
+@click.option(
+    "--code-config",
+    help="Repository code config, for example github:https://github.com/owner/repo.",
+)
+@click.option(
+    "--code-access-mode",
+    type=click.Choice(["public", "github_app"]),
+    default="public",
+    show_default=True,
+    help="GitHub access mode for --code-config.",
+)
+@click.option("--owner", help="Owner username or organization to create the project under.")
+@click.pass_obj
+def projects_create_command(
+    state: TreqsContext,
+    name: str,
+    slug: str | None,
+    visibility: str,
+    description: str | None,
+    code_config: str | None,
+    code_access_mode: str,
+    owner: str | None,
+) -> None:
+    """Create a project for a TReqs owner."""
+    auth_state, access_context = load_access_context(state)
+    scope = _resolve_project_scope(access_context, owner)
+
+    try:
+        resolved_slug = validate_slug(slug) if slug is not None else slugify_name(name)
+        parsed_code_config = (
+            parse_code_config(code_config, access_mode=cast(GitHubAccessMode, code_access_mode))
+            if code_config is not None
+            else None
+        )
+        create_input = ProjectCreateInput(
+            name=name,
+            slug=resolved_slug,
+            visibility=cast(ProjectVisibility, visibility),
+            description=description,
+            code_config=parsed_code_config,
+        )
+    except ValueError as exc:
+        raise ConfigError(str(exc)) from exc
+
+    with TreqsApiClient(auth_state.api_url) as client:
+        project = ProjectService(client, auth_state, scope).create(create_input)
+
+    if state.json_output:
+        emit_json(project)
+        return
+
+    click.echo(f"Created project {project.slug}.")
+    click.echo(f"ID: {project.id}")
+    click.echo(f"Name: {project.name}")
+    if project.visibility:
+        click.echo(f"Visibility: {project.visibility}")
+    click.echo(f"Owner: {scope.owner_username}")
 
 
 @click.group("project")
@@ -87,6 +178,20 @@ def project_clear_command(state: TreqsContext) -> None:
         emit_json({"removed": removed})
     else:
         click.echo("Cleared TReqs project context." if removed else "No project context found.")
+
+
+def _resolve_project_scope(
+    access_context: AccessContext,
+    owner: str | None,
+) -> ProjectScope:
+    if owner is not None:
+        selected_owner = resolve_owner_selection(access_context, owner)
+    else:
+        selected_owner = current_user_owner(access_context)
+    return ProjectScope(
+        owner_username=selected_owner.username,
+        current_username=access_context.user.username,
+    )
 
 
 def _project_rows(access_context: AccessContext) -> list[dict[str, str]]:

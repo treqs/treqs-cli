@@ -62,6 +62,21 @@ class ProjectJobs(BaseModel):
         return [*self.activeJobs, *self.queuedJobs, *self.finishedJobs]
 
 
+class LogChunk(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
+    sequence: int
+    content: str
+
+
+class LogPollResult(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
+    chunks: list[LogChunk] = Field(default_factory=list)
+    hasMore: bool = False
+    nextSequence: int = 0
+
+
 def filter_jobs(
     jobs: Iterable[TrainingJob],
     statuses: Sequence[str] = (),

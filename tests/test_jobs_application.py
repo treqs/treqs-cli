@@ -2,8 +2,22 @@ from __future__ import annotations
 
 import pytest
 
-from treqs_cli.application.jobs.models import ProjectJobs, TrainingJob, filter_jobs, job_rows
-from treqs_cli.application.jobs.service import JobService, project_job_path, project_jobs_path
+from treqs_cli.application.compute.service import ComputeTargetScope
+from treqs_cli.application.jobs.models import (
+    LogChunk,
+    LogPollResult,
+    ProjectJobs,
+    TrainingJob,
+    filter_jobs,
+    job_rows,
+)
+from treqs_cli.application.jobs.service import (
+    JobLogService,
+    JobService,
+    job_logs_poll_path,
+    project_job_path,
+    project_jobs_path,
+)
 from treqs_cli.errors import ApiError
 from treqs_cli.models import AuthState, RepoContext
 
@@ -80,6 +94,62 @@ def test_job_service_reports_missing_job() -> None:
 
     with pytest.raises(ApiError, match="Job missing"):
         JobService(client, auth_state, repo_context).get("missing")
+
+
+def test_job_log_service_builds_compute_target_scoped_poll_path() -> None:
+    client = _FakeJobLogClient()
+    auth_state = AuthState(api_url="https://api.treqs.ai", access_token="access-token")
+    scope = ComputeTargetScope(owner_username="acme", current_username="trevor")
+
+    result = JobLogService(client, auth_state, scope).poll(
+        "ct-1",
+        "job-1",
+        from_sequence=3,
+        timeout_ms=15000,
+    )
+
+    assert result.nextSequence == 5
+    assert result.chunks[0].content == "line\n"
+    assert job_logs_poll_path(scope, "ct-1", "job-1") == (
+        "/api/v1/user/orgs/acme/compute-targets/ct-1/jobs/job-1/logs/poll"
+    )
+    assert client.calls == [
+        ("poll", "/api/v1/user/orgs/acme/compute-targets/ct-1/jobs/job-1/logs/poll", 3, 15000),
+    ]
+
+
+def test_log_poll_result_parses_api_shape() -> None:
+    result = LogPollResult.model_validate(
+        {
+            "chunks": [{"sequence": 0, "content": "hello\n"}],
+            "hasMore": True,
+            "nextSequence": 1,
+        }
+    )
+
+    assert result.chunks == [LogChunk(sequence=0, content="hello\n")]
+    assert result.hasMore is True
+    assert result.nextSequence == 1
+
+
+class _FakeJobLogClient:
+    def __init__(self) -> None:
+        self.calls: list[tuple[object, ...]] = []
+
+    def poll_job_logs(
+        self,
+        _auth_state: AuthState,
+        path: str,
+        *,
+        from_sequence: int,
+        timeout_ms: int,
+    ) -> LogPollResult:
+        self.calls.append(("poll", path, from_sequence, timeout_ms))
+        return LogPollResult(
+            chunks=[LogChunk(sequence=4, content="line\n")],
+            hasMore=False,
+            nextSequence=5,
+        )
 
 
 class _FakeJobsClient:
