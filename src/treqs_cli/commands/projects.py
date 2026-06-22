@@ -76,6 +76,12 @@ def projects_list_command(state: TreqsContext) -> None:
     show_default=True,
     help="GitHub access mode for --code-config.",
 )
+@click.option(
+    "--default-branch",
+    default="main",
+    show_default=True,
+    help="Default git branch for --code-config (workflow discovery + clone).",
+)
 @click.option("--owner", help="Owner username or organization to create the project under.")
 @click.pass_obj
 def projects_create_command(
@@ -86,6 +92,7 @@ def projects_create_command(
     description: str | None,
     code_config: str | None,
     code_access_mode: str,
+    default_branch: str,
     owner: str | None,
 ) -> None:
     """Create a project for a TReqs owner."""
@@ -95,7 +102,11 @@ def projects_create_command(
     try:
         resolved_slug = validate_slug(slug) if slug is not None else slugify_name(name)
         parsed_code_config = (
-            parse_code_config(code_config, access_mode=cast(GitHubAccessMode, code_access_mode))
+            parse_code_config(
+                code_config,
+                access_mode=cast(GitHubAccessMode, code_access_mode),
+                default_branch=default_branch,
+            )
             if code_config is not None
             else None
         )
