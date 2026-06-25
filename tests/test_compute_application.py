@@ -102,6 +102,38 @@ def test_compute_target_create_input_sends_dedicated_payload_without_provider_co
     assert "providerConfig" not in create_input.to_api_payload()
 
 
+def test_compute_target_create_input_builds_on_demand_payload_with_install_roar() -> None:
+    create_input = ComputeTargetCreateInput(
+        name="RunPod CPU",
+        kind="on-demand",
+        type="runpod",
+        instance_type="cpu3c",
+        region="any",
+        install_roar=True,
+        auto_shutdown=True,
+        idle_timeout_minutes=15,
+    )
+
+    assert create_input.to_api_payload() == {
+        "kind": "on-demand",
+        "type": "runpod",
+        "name": "RunPod CPU",
+        "resources": {
+            "region": "any",
+            "instanceType": "cpu3c",
+            "installRoar": True,
+        },
+        "costCalculation": {},
+        "providerConfig": {
+            "provider": "runpod",
+            "instanceType": "cpu3c",
+            "region": "any",
+        },
+        "autoShutdownEnabled": True,
+        "idleTimeoutMinutes": 15,
+    }
+
+
 def test_secret_name_validation_and_assignment_parsing() -> None:
     assert validate_secret_name("API_KEY") == "API_KEY"
     assert validate_secret_name("S3_2") == "S3_2"

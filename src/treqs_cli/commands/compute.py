@@ -65,26 +65,79 @@ def compute_targets_list_command(
 @compute_targets_group.command("create")
 @click.option(
     "--kind",
-    type=click.Choice(["dedicated"]),
+    type=click.Choice(["dedicated", "on-demand"]),
     default="dedicated",
     show_default=True,
     help="Compute target kind.",
 )
 @click.option("--name", required=True, help="Compute target name.")
+@click.option(
+    "--type",
+    "target_type",
+    help="Provider for on-demand targets (runpod, lambda, aws, gcp, azure).",
+)
+@click.option("--instance-type", help="Instance type / flavor for on-demand targets (e.g. cpu3c).")
+@click.option(
+    "--region", default="any", show_default=True, help="Region (or 'any') for on-demand targets."
+)
+@click.option(
+    "--install-roar",
+    is_flag=True,
+    help="Install roar on the instance at startup via the managed bootstrap (on-demand).",
+)
+@click.option("--userdata-script", help="Extra shell run at instance startup (on-demand).")
+@click.option(
+    "--auto-shutdown", is_flag=True, help="Auto-shut down the instance when idle (on-demand)."
+)
+@click.option(
+    "--idle-timeout",
+    "idle_timeout_minutes",
+    type=int,
+    help="Idle minutes before auto-shutdown (on-demand).",
+)
+@click.option("--description", help="Compute target description.")
 @click.option("--owner", help="Owner username or organization to create the target under.")
 @click.pass_obj
 def compute_targets_create_command(
     state: TreqsContext,
     kind: str,
     name: str,
+    target_type: str | None,
+    instance_type: str | None,
+    region: str,
+    install_roar: bool,
+    userdata_script: str | None,
+    auto_shutdown: bool,
+    idle_timeout_minutes: int | None,
+    description: str | None,
     owner: str | None,
 ) -> None:
-    """Create a dedicated compute target for a TReqs owner."""
+    """Create a compute target (dedicated, or on-demand for a provider)."""
+    if kind == "on-demand":
+        if not target_type:
+            raise ConfigError("--type (provider) is required for on-demand targets.")
+        if not instance_type:
+            raise ConfigError("--instance-type is required for on-demand targets.")
+        effective_type = target_type
+    else:
+        effective_type = "dedicated"
+
     auth_state, access_context = load_access_context(state)
     scope = _resolve_compute_scope(state, access_context, owner)
     with TreqsApiClient(auth_state.api_url) as client:
         target = ComputeTargetService(client, auth_state, scope).create(
-            ComputeTargetCreateInput(name=name)
+            ComputeTargetCreateInput(
+                name=name,
+                kind=kind,
+                type=effective_type,
+                instance_type=instance_type,
+                region=region,
+                install_roar=install_roar,
+                userdata_script=userdata_script,
+                auto_shutdown=auto_shutdown,
+                idle_timeout_minutes=idle_timeout_minutes,
+                description=description,
+            )
         )
 
     if state.json_output:
@@ -93,7 +146,7 @@ def compute_targets_create_command(
 
     click.echo(f"Created compute target {target.name}.")
     click.echo(f"ID: {target.id}")
-    click.echo(f"Kind: {target.kind or 'dedicated'}")
+    click.echo(f"Kind: {target.kind or kind}")
     click.echo(f"Type: {target.type}")
 
 

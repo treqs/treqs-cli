@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import re
 from collections.abc import Sequence
-from typing import Any, Literal
+from typing import Any
 
 from pydantic import BaseModel, ConfigDict
 
@@ -26,16 +26,54 @@ class ComputeTargetCreateInput(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     name: str
-    kind: Literal["dedicated"] = "dedicated"
+    kind: str = "dedicated"
+    # For on-demand targets, `type` is the provider (runpod, lambda, aws, gcp, azure).
+    type: str = "dedicated"
+    instance_type: str | None = None
+    region: str = "any"
+    install_roar: bool = False
+    userdata_script: str | None = None
+    auto_shutdown: bool = False
+    idle_timeout_minutes: int | None = None
+    description: str | None = None
 
     def to_api_payload(self) -> dict[str, object]:
-        return {
-            "kind": self.kind,
-            "type": "dedicated",
+        if self.kind != "on-demand":
+            return {
+                "kind": "dedicated",
+                "type": "dedicated",
+                "name": self.name,
+                "resources": {},
+                "costCalculation": {},
+            }
+
+        resources: dict[str, object] = {"region": self.region}
+        if self.instance_type is not None:
+            resources["instanceType"] = self.instance_type
+        if self.install_roar:
+            resources["installRoar"] = True
+        if self.userdata_script is not None:
+            resources["userdataScript"] = self.userdata_script
+
+        payload: dict[str, object] = {
+            "kind": "on-demand",
+            "type": self.type,
             "name": self.name,
-            "resources": {},
+            "resources": resources,
             "costCalculation": {},
+            "providerConfig": {
+                "provider": self.type,
+                "instanceType": self.instance_type or "",
+                "region": self.region,
+            },
         }
+        if self.description is not None:
+            payload["description"] = self.description
+        if self.auto_shutdown:
+            payload["autoShutdownEnabled"] = True
+        if self.idle_timeout_minutes is not None:
+            payload["idleTimeoutMinutes"] = self.idle_timeout_minutes
+        return payload
 
 
 class SecretInput(BaseModel):
