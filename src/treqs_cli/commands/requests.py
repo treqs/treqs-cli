@@ -84,6 +84,10 @@ def requests_list_command(
 @click.option("--workflow-path", help="Workflow path, for example .github/workflows/train.yml.")
 @click.option("--workflow-snapshot-id", help="Workflow snapshot ID for queue-time launch.")
 @click.option("--compute-target", help="Compute target ID or name for this request.")
+@click.option(
+    "--source-branch",
+    help="Git branch the workflow and repo are cloned from (defaults to the repo default branch).",
+)
 @click.pass_obj
 def requests_create_command(
     state: TreqsContext,
@@ -93,6 +97,7 @@ def requests_create_command(
     workflow_path: str | None,
     workflow_snapshot_id: str | None,
     compute_target: str | None,
+    source_branch: str | None,
 ) -> None:
     """Create a training request in the repo-local project context."""
     auth_state, repo_context = load_project_api_context(state)
@@ -108,6 +113,7 @@ def requests_create_command(
                 workflow_path=workflow_path,
                 compute_target_id=compute_target_id,
                 workflow_snapshot_id=workflow_snapshot_id,
+                source_branch=source_branch,
             )
         )
 
@@ -166,6 +172,10 @@ def requests_show_command(state: TreqsContext, request_id: str) -> None:
 @click.option("--workflow-path", help="Workflow path, for example .github/workflows/train.yml.")
 @click.option("--workflow-snapshot-id", help="Workflow snapshot ID for queue-time launch.")
 @click.option("--compute-target", help="Compute target ID or name for this request.")
+@click.option(
+    "--source-branch",
+    help="Git branch the workflow and repo are cloned from (defaults to the repo default branch).",
+)
 @click.option("--clear-description", is_flag=True, help="Clear the request description.")
 @click.option("--clear-workflow-path", is_flag=True, help="Clear the workflow path.")
 @click.option("--clear-compute-target", is_flag=True, help="Clear the compute target selection.")
@@ -182,6 +192,7 @@ def requests_update_command(
     workflow_path: str | None,
     workflow_snapshot_id: str | None,
     compute_target: str | None,
+    source_branch: str | None,
     clear_description: bool,
     clear_workflow_path: bool,
     clear_compute_target: bool,
@@ -208,6 +219,7 @@ def requests_update_command(
             workflow_path,
             workflow_snapshot_id,
             compute_target,
+            source_branch,
         )
     ) and not any(
         (
@@ -232,6 +244,7 @@ def requests_update_command(
                 workflow_path=workflow_path,
                 compute_target_id=compute_target_id,
                 workflow_snapshot_id=workflow_snapshot_id,
+                source_branch=source_branch,
                 clear_description=clear_description,
                 clear_workflow_path=clear_workflow_path,
                 clear_compute_target=clear_compute_target,

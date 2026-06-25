@@ -26,6 +26,7 @@ def test_create_input_builds_api_payload_and_forbids_unknown_fields() -> None:
         workflow_path=".github/workflows/train.yml",
         compute_target_id="ct-1",
         workflow_snapshot_id="snapshot-1",
+        source_branch="tb/mnist-e2e-story",
     )
 
     assert create_input.to_api_payload() == {
@@ -35,6 +36,7 @@ def test_create_input_builds_api_payload_and_forbids_unknown_fields() -> None:
         "workflowPath": ".github/workflows/train.yml",
         "computeSelection": {"targetId": "ct-1"},
         "workflowSnapshotId": "snapshot-1",
+        "codeConfig": {"sourceBranch": "tb/mnist-e2e-story"},
     }
     with pytest.raises(ValidationError):
         TrainingRequestCreateInput.model_validate({"title": "Train model", "unexpected": "field"})
@@ -46,6 +48,7 @@ def test_update_input_builds_clear_payload() -> None:
         clear_workflow_path=True,
         clear_compute_target=True,
         clear_workflow_snapshot=True,
+        clear_source_branch=True,
     )
 
     assert update_input.to_api_payload() == {
@@ -53,6 +56,7 @@ def test_update_input_builds_clear_payload() -> None:
         "workflowPath": None,
         "computeSelection": {"targetId": None},
         "workflowSnapshotId": None,
+        "codeConfig": {"sourceBranch": None},
     }
 
 
