@@ -118,9 +118,13 @@ def parse_secret_assignment(assignment: str) -> SecretInput:
     return SecretInput(name=validated_name, value=value)
 
 
-def compute_target_rows(targets: Sequence[ComputeTarget]) -> list[dict[str, str]]:
-    return [
-        {
+def compute_target_rows(
+    targets: Sequence[ComputeTarget],
+    owner_by_id: dict[str, str] | None = None,
+) -> list[dict[str, str]]:
+    rows: list[dict[str, str]] = []
+    for target in targets:
+        row = {
             "id": target.id,
             "name": target.name,
             "kind": target.kind or "",
@@ -128,8 +132,10 @@ def compute_target_rows(targets: Sequence[ComputeTarget]) -> list[dict[str, str]
             "status": target.status or "",
             "agent": _agent_status(target.agent),
         }
-        for target in targets
-    ]
+        if owner_by_id is not None:
+            row["owner"] = owner_by_id.get(target.ownerId or "", target.ownerId or "")
+        rows.append(row)
+    return rows
 
 
 def _agent_status(agent: dict[str, Any] | None) -> str:

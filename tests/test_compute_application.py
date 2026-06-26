@@ -51,6 +51,20 @@ def test_compute_target_rows_and_selection_resolution() -> None:
     assert resolve_compute_target_id(targets, "ct-b") == "ct-beta"
 
 
+def test_compute_target_rows_includes_owner_when_owner_map_provided() -> None:
+    targets = [
+        ComputeTarget(id="ct-a", name="A", type="runpod", kind="on-demand", ownerId="o-treqs"),
+        ComputeTarget(id="ct-b", name="B", type="dedicated", kind="dedicated", ownerId="o-trev"),
+    ]
+    owner_by_id = {"o-treqs": "treqs", "o-trev": "trevor"}
+
+    rows = compute_target_rows(targets, owner_by_id)
+    assert rows[0]["owner"] == "treqs"
+    assert rows[1]["owner"] == "trevor"
+    # Without the owner map there is no owner column.
+    assert "owner" not in compute_target_rows(targets)[0]
+
+
 def test_compute_target_service_builds_owner_scoped_path() -> None:
     client = _FakeComputeTargetClient()
     auth_state = AuthState(api_url="https://api.treqs.ai", access_token="access-token")

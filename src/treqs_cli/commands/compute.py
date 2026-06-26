@@ -4,6 +4,7 @@ import click
 
 from ..api import TreqsApiClient
 from ..application.compute.models import (
+    ComputeTarget,
     ComputeTargetCreateInput,
     compute_target_rows,
     parse_secret_assignment,
@@ -33,33 +34,65 @@ def compute_targets_group() -> None:
 @compute_targets_group.command("list")
 @click.option("--include-agent", is_flag=True, help="Include registered agent details.")
 @click.option("--owner", help="Owner username or organization to inspect.")
+@click.option(
+    "--all",
+    "list_all",
+    is_flag=True,
+    help="List compute targets across every owner available to you.",
+)
 @click.pass_obj
 def compute_targets_list_command(
     state: TreqsContext,
     include_agent: bool,
     owner: str | None,
+    list_all: bool,
 ) -> None:
-    """List compute targets for a TReqs owner."""
+    """List compute targets for a TReqs owner (or all your owners with --all)."""
     auth_state, access_context = load_access_context(state)
-    scope = _resolve_compute_scope(state, access_context, owner)
+    if list_all and owner:
+        raise ConfigError("--all and --owner cannot be used together.")
+
+    owner_by_id = {o.id: o.username for o in access_context.owners}
+
     with TreqsApiClient(auth_state.api_url) as client:
-        targets = ComputeTargetService(client, auth_state, scope).list(include_agent=include_agent)
+        targets: list[ComputeTarget]
+        if list_all:
+            targets = []
+            for access_owner in access_context.owners:
+                scope = ComputeTargetScope(
+                    owner_username=access_owner.username,
+                    current_username=access_context.user.username,
+                )
+                targets.extend(
+                    ComputeTargetService(client, auth_state, scope).list(
+                        include_agent=include_agent
+                    )
+                )
+            scope_label = "all your owners"
+        else:
+            scope = _resolve_compute_scope(state, access_context, owner)
+            targets = ComputeTargetService(client, auth_state, scope).list(
+                include_agent=include_agent
+            )
+            scope_label = scope.owner_username
 
     if state.json_output:
         emit_json(targets)
         return
 
-    render_table(
-        compute_target_rows(targets),
-        [
-            ("id", "ID"),
-            ("name", "NAME"),
-            ("kind", "KIND"),
-            ("type", "TYPE"),
-            ("status", "STATUS"),
-            ("agent", "AGENT"),
-        ],
-    )
+    click.echo(f"Compute targets for {scope_label} ({len(targets)}):")
+    headers = [
+        ("id", "ID"),
+        ("name", "NAME"),
+        ("kind", "KIND"),
+        ("type", "TYPE"),
+        ("status", "STATUS"),
+        ("agent", "AGENT"),
+    ]
+    if list_all:
+        render_table(compute_target_rows(targets, owner_by_id), [("owner", "OWNER"), *headers])
+    else:
+        render_table(compute_target_rows(targets), headers)
 
 
 @compute_targets_group.command("create")
