@@ -148,6 +148,25 @@ def test_compute_target_create_input_builds_on_demand_payload_with_install_roar(
     }
 
 
+def test_compute_target_create_input_pins_roar_ref_for_source_build() -> None:
+    create_input = ComputeTargetCreateInput(
+        name="RunPod CPU",
+        kind="on-demand",
+        type="runpod",
+        instance_type="cpu3c",
+        install_roar=True,
+        roar_ref="main",
+    )
+
+    resources = create_input.to_api_payload()["resources"]
+    assert resources["installRoar"] is True
+    assert resources["roarRef"] == "main"
+    # No roarRef -> key omitted (PyPI default install).
+    assert "roarRef" not in ComputeTargetCreateInput(
+        name="x", kind="on-demand", type="runpod", instance_type="cpu3c", install_roar=True
+    ).to_api_payload()["resources"]
+
+
 def test_secret_name_validation_and_assignment_parsing() -> None:
     assert validate_secret_name("API_KEY") == "API_KEY"
     assert validate_secret_name("S3_2") == "S3_2"

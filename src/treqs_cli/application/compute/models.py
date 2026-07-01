@@ -32,6 +32,7 @@ class ComputeTargetCreateInput(BaseModel):
     instance_type: str | None = None
     region: str = "any"
     install_roar: bool = False
+    roar_ref: str | None = None
     userdata_script: str | None = None
     auto_shutdown: bool = False
     idle_timeout_minutes: int | None = None
@@ -52,6 +53,8 @@ class ComputeTargetCreateInput(BaseModel):
             resources["instanceType"] = self.instance_type
         if self.install_roar:
             resources["installRoar"] = True
+        if self.roar_ref is not None:
+            resources["roarRef"] = self.roar_ref
         if self.userdata_script is not None:
             resources["userdataScript"] = self.userdata_script
 

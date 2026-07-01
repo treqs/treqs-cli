@@ -118,6 +118,14 @@ def compute_targets_list_command(
     is_flag=True,
     help="Install roar on the instance at startup via the managed bootstrap (on-demand).",
 )
+@click.option(
+    "--roar-ref",
+    "roar_ref",
+    help=(
+        "Pin roar to a git ref (branch/tag) built from source instead of the "
+        "PyPI release (on-demand; requires --install-roar)."
+    ),
+)
 @click.option("--userdata-script", help="Extra shell run at instance startup (on-demand).")
 @click.option(
     "--auto-shutdown", is_flag=True, help="Auto-shut down the instance when idle (on-demand)."
@@ -139,6 +147,7 @@ def compute_targets_create_command(
     instance_type: str | None,
     region: str,
     install_roar: bool,
+    roar_ref: str | None,
     userdata_script: str | None,
     auto_shutdown: bool,
     idle_timeout_minutes: int | None,
@@ -166,6 +175,7 @@ def compute_targets_create_command(
                 instance_type=instance_type,
                 region=region,
                 install_roar=install_roar,
+                roar_ref=roar_ref,
                 userdata_script=userdata_script,
                 auto_shutdown=auto_shutdown,
                 idle_timeout_minutes=idle_timeout_minutes,
