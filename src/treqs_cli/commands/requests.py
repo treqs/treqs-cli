@@ -88,6 +88,15 @@ def requests_list_command(
     "--source-branch",
     help="Git branch the workflow and repo are cloned from (defaults to the repo default branch).",
 )
+@click.option(
+    "--lineage-mode",
+    type=click.Choice(["private", "public", "public_anonymous"]),
+    help=(
+        "Publish lineage natively for this fresh workflow: compiles a lineage "
+        "snapshot so the run publishes to GLaaS (private = linked to the project). "
+        "Requires --workflow-path."
+    ),
+)
 @click.pass_obj
 def requests_create_command(
     state: TreqsContext,
@@ -98,8 +107,11 @@ def requests_create_command(
     workflow_snapshot_id: str | None,
     compute_target: str | None,
     source_branch: str | None,
+    lineage_mode: str | None,
 ) -> None:
     """Create a training request in the repo-local project context."""
+    if lineage_mode is not None and not workflow_path:
+        raise ConfigError("--lineage-mode requires --workflow-path.")
     auth_state, repo_context = load_project_api_context(state)
     with TreqsApiClient(auth_state.api_url) as client:
         compute_target_id = _resolve_compute_target(
@@ -114,6 +126,7 @@ def requests_create_command(
                 compute_target_id=compute_target_id,
                 workflow_snapshot_id=workflow_snapshot_id,
                 source_branch=source_branch,
+                lineage_mode=lineage_mode,
             )
         )
 

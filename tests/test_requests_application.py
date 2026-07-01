@@ -42,6 +42,19 @@ def test_create_input_builds_api_payload_and_forbids_unknown_fields() -> None:
         TrainingRequestCreateInput.model_validate({"title": "Train model", "unexpected": "field"})
 
 
+def test_create_input_includes_lineage_mode_when_set() -> None:
+    create_input = TrainingRequestCreateInput(
+        title="Private run",
+        workflow_path=".treqs/workflows/mnist.yaml",
+        source_branch="tb/x",
+        lineage_mode="private",
+    )
+
+    assert create_input.to_api_payload()["lineagePublicationMode"] == "private"
+    # Omitted by default so existing (non-lineage) creates are unchanged.
+    assert "lineagePublicationMode" not in TrainingRequestCreateInput(title="x").to_api_payload()
+
+
 def test_update_input_builds_clear_payload() -> None:
     update_input = TrainingRequestUpdateInput(
         clear_description=True,

@@ -25,6 +25,7 @@ class TrainingRequestCreateInput(BaseModel):
     compute_target_id: str | None = None
     workflow_snapshot_id: str | None = None
     source_branch: str | None = None
+    lineage_mode: str | None = None
 
     def to_api_payload(self) -> dict[str, object]:
         payload: dict[str, object] = {"title": self.title, "status": self.status}
@@ -38,6 +39,8 @@ class TrainingRequestCreateInput(BaseModel):
             payload["workflowSnapshotId"] = self.workflow_snapshot_id
         if self.source_branch is not None:
             payload["codeConfig"] = {"sourceBranch": self.source_branch}
+        if self.lineage_mode is not None:
+            payload["lineagePublicationMode"] = self.lineage_mode
         return payload
 
 
