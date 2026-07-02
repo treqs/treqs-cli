@@ -4,6 +4,7 @@ import pytest
 
 from treqs_cli.application.compute.service import ComputeTargetScope
 from treqs_cli.application.jobs.models import (
+    LineageRepublishResult,
     LogChunk,
     LogPollResult,
     ProjectJobs,
@@ -74,6 +75,30 @@ def test_job_service_builds_project_path_and_finds_job() -> None:
     assert client.calls == [
         ("list", "/api/v1/user/orgs/acme/projects/mnist/jobs", 20, "QUEUED"),
         ("get", "/api/v1/user/orgs/acme/projects/mnist/jobs/job-1"),
+    ]
+
+
+def test_job_service_republish_lineage_builds_path_and_parses_result() -> None:
+    client = _FakeJobsClient()
+    auth_state = AuthState(api_url="https://api.treqs.ai", access_token="access-token")
+    repo_context = RepoContext(
+        api_url="https://api.treqs.ai",
+        owner_id="org-1",
+        owner_type="organization",
+        owner_username="acme",
+        owner_display_name="Acme",
+        project_id="project-1",
+        project_slug="mnist",
+        project_name="MNIST",
+        current_username="trevor",
+    )
+
+    result = JobService(client, auth_state, repo_context).republish_lineage("job-1")
+
+    assert result.publication_status == "published"
+    assert result.published_session_hash == "a" * 64
+    assert client.calls == [
+        ("republish", "/api/v1/user/orgs/acme/projects/mnist/jobs/job-1/lineage/republish"),
     ]
 
 
@@ -174,6 +199,18 @@ class _FakeJobsClient:
                     status="QUEUED",
                 )
             ]
+        )
+
+    def republish_job_lineage(
+        self,
+        _auth_state: AuthState,
+        path: str,
+    ) -> LineageRepublishResult:
+        self.calls.append(("republish", path))
+        return LineageRepublishResult(
+            publication_status="published",
+            published_session_hash="a" * 64,
+            published_url="https://dev.glaas.ai/dag/" + "a" * 64,
         )
 
     def get_project_job(

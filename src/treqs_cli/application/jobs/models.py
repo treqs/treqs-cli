@@ -62,6 +62,14 @@ class ProjectJobs(BaseModel):
         return [*self.activeJobs, *self.queuedJobs, *self.finishedJobs]
 
 
+class LineageRepublishResult(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
+    publication_status: str
+    published_session_hash: str | None = None
+    published_url: str | None = None
+
+
 class LogChunk(BaseModel):
     model_config = ConfigDict(extra="allow")
 

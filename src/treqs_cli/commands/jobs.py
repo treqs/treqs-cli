@@ -93,6 +93,30 @@ def jobs_show_command(state: TreqsContext, job_id: str) -> None:
         click.echo(f"Updated: {job.updatedAt}")
 
 
+@jobs_group.command("republish-lineage")
+@click.argument("job_id")
+@click.pass_obj
+def jobs_republish_lineage_command(state: TreqsContext, job_id: str) -> None:
+    """Re-publish a job's stored lineage package to GLaaS.
+
+    Recovers a lineage publication that failed transiently (for example a GLaaS
+    outage) from the package stored at upload time — no need to re-run training.
+    """
+    auth_state, repo_context = load_project_api_context(state)
+    with TreqsApiClient(auth_state.api_url) as client:
+        result = JobService(client, auth_state, repo_context).republish_lineage(job_id)
+
+    if state.json_output:
+        emit_json(result)
+        return
+
+    click.echo(f"Publication status: {result.publication_status}")
+    if result.published_session_hash:
+        click.echo(f"Session: {result.published_session_hash}")
+    if result.published_url:
+        click.echo(f"Lineage URL: {result.published_url}")
+
+
 @jobs_group.command("logs")
 @click.argument("job_id")
 @click.option("--target", "target", help="Compute target ID or name. Defaults to the job's target.")

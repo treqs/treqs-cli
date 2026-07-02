@@ -8,7 +8,13 @@ from urllib.parse import quote
 from ...context import owner_path
 from ...models import AuthState, RepoContext
 from ..compute.service import ComputeTargetScope
-from .models import JobStatus, LogPollResult, ProjectJobs, TrainingJob
+from .models import (
+    JobStatus,
+    LineageRepublishResult,
+    LogPollResult,
+    ProjectJobs,
+    TrainingJob,
+)
 
 
 class JobsApi(Protocol):
@@ -26,6 +32,12 @@ class JobsApi(Protocol):
         auth_state: AuthState,
         path: str,
     ) -> TrainingJob: ...
+
+    def republish_job_lineage(
+        self,
+        auth_state: AuthState,
+        path: str,
+    ) -> LineageRepublishResult: ...
 
 
 class JobLogApi(Protocol):
@@ -73,6 +85,12 @@ class JobService:
         return self.client.get_project_job(
             self.auth_state,
             project_job_path(self.repo_context, job_id),
+        )
+
+    def republish_lineage(self, job_id: str) -> LineageRepublishResult:
+        return self.client.republish_job_lineage(
+            self.auth_state,
+            f"{project_job_path(self.repo_context, job_id)}/lineage/republish",
         )
 
 
