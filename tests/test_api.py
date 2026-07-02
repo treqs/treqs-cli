@@ -453,6 +453,181 @@ def test_compute_and_job_methods_use_owner_project_paths() -> None:
     ]
 
 
+def test_write_surface_methods_use_owner_paths_and_payloads() -> None:
+    seen_requests: list[tuple[str, str, dict[str, str], object | None]] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        body = json.loads(request.content.decode("utf-8")) if request.content else None
+        seen_requests.append(
+            (
+                request.method,
+                request.url.path,
+                dict(request.url.params.multi_items()),
+                body,
+            )
+        )
+        if request.url.path.endswith("/projects"):
+            return httpx.Response(
+                200,
+                json={
+                    "success": True,
+                    "data": {
+                        "id": "project-1",
+                        "slug": "mnist",
+                        "name": "MNIST",
+                        "visibility": "private",
+                    },
+                },
+            )
+        if request.url.path.endswith("/secrets"):
+            return httpx.Response(
+                200,
+                json={"success": True, "data": {"name": "API_KEY"}},
+            )
+        if request.url.path.endswith("/registration-codes"):
+            return httpx.Response(
+                201,
+                json={"success": True, "data": {"id": "rc-1", "code": "ABC123"}},
+            )
+        if request.url.path.endswith("/logs/poll"):
+            return httpx.Response(
+                200,
+                json={
+                    "success": True,
+                    "data": {
+                        "chunks": [{"sequence": 3, "content": "log line\n"}],
+                        "hasMore": False,
+                        "nextSequence": 4,
+                    },
+                },
+            )
+        return httpx.Response(
+            200,
+            json={
+                "success": True,
+                "data": {
+                    "id": "ct-1",
+                    "name": "Dedicated GPU",
+                    "kind": "dedicated",
+                    "type": "dedicated",
+                },
+            },
+        )
+
+    client = TreqsApiClient(
+        "https://api.treqs.ai",
+        http_client=httpx.Client(transport=httpx.MockTransport(handler)),
+    )
+    auth_state = AuthState(api_url="https://api.treqs.ai", access_token="access-token")
+
+    project = client.create_project(
+        auth_state,
+        "/api/v1/user/orgs/acme/projects",
+        {"name": "MNIST", "slug": "mnist", "visibility": "private"},
+    )
+    target = client.create_compute_target(
+        auth_state,
+        "/api/v1/user/orgs/acme/compute-targets",
+        {
+            "kind": "dedicated",
+            "type": "dedicated",
+            "name": "Dedicated GPU",
+            "resources": {},
+            "costCalculation": {},
+        },
+    )
+    client.set_compute_target_secret(
+        auth_state,
+        "/api/v1/user/orgs/acme/compute-targets/ct-1/secrets",
+        {"name": "API_KEY", "value": "secret-value"},
+    )
+    code = client.create_registration_code(
+        auth_state,
+        "/api/v1/user/orgs/acme/compute-targets/ct-1/agent/registration-codes",
+    )
+    logs = client.poll_job_logs(
+        auth_state,
+        "/api/v1/user/orgs/acme/compute-targets/ct-1/jobs/job-1/logs/poll",
+        from_sequence=3,
+        timeout_ms=15000,
+    )
+
+    assert project.id == "project-1"
+    assert target.id == "ct-1"
+    assert code.code == "ABC123"
+    assert logs.chunks[0].content == "log line\n"
+    assert logs.nextSequence == 4
+    assert seen_requests == [
+        (
+            "POST",
+            "/api/v1/user/orgs/acme/projects",
+            {},
+            {"name": "MNIST", "slug": "mnist", "visibility": "private"},
+        ),
+        (
+            "POST",
+            "/api/v1/user/orgs/acme/compute-targets",
+            {},
+            {
+                "kind": "dedicated",
+                "type": "dedicated",
+                "name": "Dedicated GPU",
+                "resources": {},
+                "costCalculation": {},
+            },
+        ),
+        (
+            "PUT",
+            "/api/v1/user/orgs/acme/compute-targets/ct-1/secrets",
+            {},
+            {"name": "API_KEY", "value": "secret-value"},
+        ),
+        (
+            "POST",
+            "/api/v1/user/orgs/acme/compute-targets/ct-1/agent/registration-codes",
+            {},
+            None,
+        ),
+        (
+            "GET",
+            "/api/v1/user/orgs/acme/compute-targets/ct-1/jobs/job-1/logs/poll",
+            {"from": "3", "timeout": "15000"},
+            None,
+        ),
+    ]
+
+
+def test_poll_job_logs_raises_http_timeout_above_poll_timeout() -> None:
+    seen_timeouts: list[float | None] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen_timeouts.append(request.extensions.get("timeout", {}).get("read"))
+        return httpx.Response(
+            200,
+            json={
+                "success": True,
+                "data": {"chunks": [], "hasMore": False, "nextSequence": 0},
+            },
+        )
+
+    client = TreqsApiClient(
+        "https://api.treqs.ai",
+        http_client=httpx.Client(transport=httpx.MockTransport(handler)),
+    )
+    auth_state = AuthState(api_url="https://api.treqs.ai", access_token="access-token")
+
+    client.poll_job_logs(
+        auth_state,
+        "/api/v1/user/compute-targets/ct-1/jobs/job-1/logs/poll",
+        from_sequence=0,
+        timeout_ms=30000,
+    )
+
+    # HTTP read timeout must sit safely above the 30s server-side long-poll timeout.
+    assert seen_timeouts[0] is not None
+    assert seen_timeouts[0] > 30.0
+
+
 def _access_context_payload() -> dict[str, object]:
     return {
         "user": {

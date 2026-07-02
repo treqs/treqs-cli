@@ -3,9 +3,19 @@ from __future__ import annotations
 import click
 
 from ..api import TreqsApiClient
-from ..application.compute.models import compute_target_rows
-from ..application.compute.service import ComputeTargetScope, ComputeTargetService
+from ..application.compute.models import (
+    ComputeTarget,
+    ComputeTargetCreateInput,
+    compute_target_rows,
+    parse_secret_assignment,
+)
+from ..application.compute.service import (
+    ComputeTargetScope,
+    ComputeTargetService,
+    resolve_compute_target_id,
+)
 from ..context import TreqsContext, current_user_owner, resolve_owner_selection
+from ..errors import ConfigError, TreqsCliError
 from ..models import AccessContext
 from ..output import emit_json, render_table
 from .shared import load_access_context
@@ -24,33 +34,258 @@ def compute_targets_group() -> None:
 @compute_targets_group.command("list")
 @click.option("--include-agent", is_flag=True, help="Include registered agent details.")
 @click.option("--owner", help="Owner username or organization to inspect.")
+@click.option(
+    "--all",
+    "list_all",
+    is_flag=True,
+    help="List compute targets across every owner available to you.",
+)
 @click.pass_obj
 def compute_targets_list_command(
     state: TreqsContext,
     include_agent: bool,
     owner: str | None,
+    list_all: bool,
 ) -> None:
-    """List compute targets for a TReqs owner."""
+    """List compute targets for a TReqs owner (or all your owners with --all)."""
     auth_state, access_context = load_access_context(state)
-    scope = _resolve_compute_scope(state, access_context, owner)
+    if list_all and owner:
+        raise ConfigError("--all and --owner cannot be used together.")
+
+    owner_by_id = {o.id: o.username for o in access_context.owners}
+
     with TreqsApiClient(auth_state.api_url) as client:
-        targets = ComputeTargetService(client, auth_state, scope).list(include_agent=include_agent)
+        targets: list[ComputeTarget]
+        if list_all:
+            targets = []
+            for access_owner in access_context.owners:
+                scope = ComputeTargetScope(
+                    owner_username=access_owner.username,
+                    current_username=access_context.user.username,
+                )
+                targets.extend(
+                    ComputeTargetService(client, auth_state, scope).list(
+                        include_agent=include_agent
+                    )
+                )
+            scope_label = "all your owners"
+        else:
+            scope = _resolve_compute_scope(state, access_context, owner)
+            targets = ComputeTargetService(client, auth_state, scope).list(
+                include_agent=include_agent
+            )
+            scope_label = scope.owner_username
 
     if state.json_output:
         emit_json(targets)
         return
 
-    render_table(
-        compute_target_rows(targets),
-        [
-            ("id", "ID"),
-            ("name", "NAME"),
-            ("kind", "KIND"),
-            ("type", "TYPE"),
-            ("status", "STATUS"),
-            ("agent", "AGENT"),
-        ],
-    )
+    click.echo(f"Compute targets for {scope_label} ({len(targets)}):")
+    headers = [
+        ("id", "ID"),
+        ("name", "NAME"),
+        ("kind", "KIND"),
+        ("type", "TYPE"),
+        ("status", "STATUS"),
+        ("agent", "AGENT"),
+    ]
+    if list_all:
+        render_table(compute_target_rows(targets, owner_by_id), [("owner", "OWNER"), *headers])
+    else:
+        render_table(compute_target_rows(targets), headers)
+
+
+@compute_targets_group.command("create")
+@click.option(
+    "--kind",
+    type=click.Choice(["dedicated", "on-demand"]),
+    default="dedicated",
+    show_default=True,
+    help="Compute target kind.",
+)
+@click.option("--name", required=True, help="Compute target name.")
+@click.option(
+    "--type",
+    "target_type",
+    help="Provider for on-demand targets (runpod, lambda, aws, gcp, azure).",
+)
+@click.option("--instance-type", help="Instance type / flavor for on-demand targets (e.g. cpu3c).")
+@click.option(
+    "--region", default="any", show_default=True, help="Region (or 'any') for on-demand targets."
+)
+@click.option(
+    "--install-roar",
+    is_flag=True,
+    help="Install roar on the instance at startup via the managed bootstrap (on-demand).",
+)
+@click.option(
+    "--roar-ref",
+    "roar_ref",
+    help=(
+        "Pin roar to a git ref (branch/tag) built from source instead of the "
+        "PyPI release (on-demand; requires --install-roar)."
+    ),
+)
+@click.option("--userdata-script", help="Extra shell run at instance startup (on-demand).")
+@click.option(
+    "--auto-shutdown", is_flag=True, help="Auto-shut down the instance when idle (on-demand)."
+)
+@click.option(
+    "--idle-timeout",
+    "idle_timeout_minutes",
+    type=int,
+    help="Idle minutes before auto-shutdown (on-demand).",
+)
+@click.option("--description", help="Compute target description.")
+@click.option("--owner", help="Owner username or organization to create the target under.")
+@click.pass_obj
+def compute_targets_create_command(
+    state: TreqsContext,
+    kind: str,
+    name: str,
+    target_type: str | None,
+    instance_type: str | None,
+    region: str,
+    install_roar: bool,
+    roar_ref: str | None,
+    userdata_script: str | None,
+    auto_shutdown: bool,
+    idle_timeout_minutes: int | None,
+    description: str | None,
+    owner: str | None,
+) -> None:
+    """Create a compute target (dedicated, or on-demand for a provider)."""
+    if kind == "on-demand":
+        if not target_type:
+            raise ConfigError("--type (provider) is required for on-demand targets.")
+        if not instance_type:
+            raise ConfigError("--instance-type is required for on-demand targets.")
+        effective_type = target_type
+    else:
+        effective_type = "dedicated"
+
+    auth_state, access_context = load_access_context(state)
+    scope = _resolve_compute_scope(state, access_context, owner)
+    with TreqsApiClient(auth_state.api_url) as client:
+        target = ComputeTargetService(client, auth_state, scope).create(
+            ComputeTargetCreateInput(
+                name=name,
+                kind=kind,
+                type=effective_type,
+                instance_type=instance_type,
+                region=region,
+                install_roar=install_roar,
+                roar_ref=roar_ref,
+                userdata_script=userdata_script,
+                auto_shutdown=auto_shutdown,
+                idle_timeout_minutes=idle_timeout_minutes,
+                description=description,
+            )
+        )
+
+    if state.json_output:
+        emit_json(target)
+        return
+
+    click.echo(f"Created compute target {target.name}.")
+    click.echo(f"ID: {target.id}")
+    click.echo(f"Kind: {target.kind or kind}")
+    click.echo(f"Type: {target.type}")
+
+
+@compute_group.group("secrets")
+def compute_secrets_group() -> None:
+    """Manage compute target secrets for the current TReqs owner."""
+
+
+@compute_secrets_group.command("set")
+@click.option("--target", "target", required=True, help="Compute target ID or name.")
+@click.option("--owner", help="Owner username or organization that owns the target.")
+@click.argument("assignments", nargs=-1, required=True)
+@click.pass_obj
+def compute_secrets_set_command(
+    state: TreqsContext,
+    target: str,
+    owner: str | None,
+    assignments: tuple[str, ...],
+) -> None:
+    """Set one or more KEY=VALUE secrets on a compute target."""
+    auth_state, access_context = load_access_context(state)
+    scope = _resolve_compute_scope(state, access_context, owner)
+
+    try:
+        secrets = [parse_secret_assignment(assignment) for assignment in assignments]
+    except ValueError as exc:
+        raise ConfigError(str(exc)) from exc
+
+    succeeded: list[str] = []
+    failures: list[tuple[str, str]] = []
+    with TreqsApiClient(auth_state.api_url) as client:
+        service = ComputeTargetService(client, auth_state, scope)
+        target_id = _resolve_target_id(service, target)
+        for secret in secrets:
+            try:
+                service.set_secret(target_id, secret)
+            except TreqsCliError as exc:
+                # Non-atomic: record the failure and keep setting the remaining secrets.
+                failures.append((secret.name, str(exc)))
+            else:
+                succeeded.append(secret.name)
+
+    if state.json_output:
+        emit_json(
+            {
+                "targetId": target_id,
+                "succeeded": succeeded,
+                "failed": [{"name": name, "error": error} for name, error in failures],
+            }
+        )
+    else:
+        for name in succeeded:
+            click.echo(f"Set secret {name}.")
+        for name, error in failures:
+            click.echo(f"Failed to set secret {name}: {error}")
+
+    if failures:
+        raise ConfigError(
+            f"Failed to set {len(failures)} of {len(secrets)} secrets on compute target {target}."
+        )
+
+
+@compute_targets_group.group("registration-code")
+def compute_targets_registration_code_group() -> None:
+    """Manage agent registration codes for compute targets."""
+
+
+@compute_targets_registration_code_group.command("create")
+@click.option("--target", "target", required=True, help="Compute target ID or name.")
+@click.option("--owner", help="Owner username or organization that owns the target.")
+@click.pass_obj
+def compute_targets_registration_code_create_command(
+    state: TreqsContext,
+    target: str,
+    owner: str | None,
+) -> None:
+    """Create an agent registration code for a compute target."""
+    auth_state, access_context = load_access_context(state)
+    scope = _resolve_compute_scope(state, access_context, owner)
+    with TreqsApiClient(auth_state.api_url) as client:
+        service = ComputeTargetService(client, auth_state, scope)
+        target_id = _resolve_target_id(service, target)
+        registration_code = service.create_registration_code(target_id)
+
+    if state.json_output:
+        emit_json(registration_code)
+        return
+
+    click.echo(registration_code.code)
+
+
+def _resolve_target_id(service: ComputeTargetService, selection: str) -> str:
+    try:
+        return resolve_compute_target_id(service.list(), selection)
+    except ValueError as exc:
+        raise ConfigError(str(exc)) from exc
 
 
 def _resolve_compute_scope(

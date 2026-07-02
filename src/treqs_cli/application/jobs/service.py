@@ -7,7 +7,14 @@ from urllib.parse import quote
 
 from ...context import owner_path
 from ...models import AuthState, RepoContext
-from .models import JobStatus, ProjectJobs, TrainingJob
+from ..compute.service import ComputeTargetScope
+from .models import (
+    JobStatus,
+    LineageRepublishResult,
+    LogPollResult,
+    ProjectJobs,
+    TrainingJob,
+)
 
 
 class JobsApi(Protocol):
@@ -25,6 +32,23 @@ class JobsApi(Protocol):
         auth_state: AuthState,
         path: str,
     ) -> TrainingJob: ...
+
+    def republish_job_lineage(
+        self,
+        auth_state: AuthState,
+        path: str,
+    ) -> LineageRepublishResult: ...
+
+
+class JobLogApi(Protocol):
+    def poll_job_logs(
+        self,
+        auth_state: AuthState,
+        path: str,
+        *,
+        from_sequence: int,
+        timeout_ms: int,
+    ) -> LogPollResult: ...
 
 
 @dataclass(frozen=True)
@@ -63,6 +87,34 @@ class JobService:
             project_job_path(self.repo_context, job_id),
         )
 
+    def republish_lineage(self, job_id: str) -> LineageRepublishResult:
+        return self.client.republish_job_lineage(
+            self.auth_state,
+            f"{project_job_path(self.repo_context, job_id)}/lineage/republish",
+        )
+
+
+@dataclass(frozen=True)
+class JobLogService:
+    client: JobLogApi
+    auth_state: AuthState
+    scope: ComputeTargetScope | RepoContext
+
+    def poll(
+        self,
+        target_id: str,
+        job_id: str,
+        *,
+        from_sequence: int,
+        timeout_ms: int,
+    ) -> LogPollResult:
+        return self.client.poll_job_logs(
+            self.auth_state,
+            job_logs_poll_path(self.scope, target_id, job_id),
+            from_sequence=from_sequence,
+            timeout_ms=timeout_ms,
+        )
+
 
 def project_jobs_path(repo_context: RepoContext) -> str:
     return owner_path(
@@ -74,3 +126,16 @@ def project_jobs_path(repo_context: RepoContext) -> str:
 
 def project_job_path(repo_context: RepoContext, job_id: str) -> str:
     return f"{project_jobs_path(repo_context)}/{quote(job_id, safe='')}"
+
+
+def job_logs_poll_path(
+    scope: ComputeTargetScope | RepoContext,
+    target_id: str,
+    job_id: str,
+) -> str:
+    return owner_path(
+        scope.owner_username,
+        scope.current_username,
+        f"/compute-targets/{quote(target_id, safe='')}"
+        f"/jobs/{quote(job_id, safe='')}/logs/poll",
+    )

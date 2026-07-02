@@ -5,9 +5,16 @@ from typing import cast
 import click
 
 from ..api import TreqsApiClient
+from ..application.compute.service import (
+    ComputeTargetScope,
+    ComputeTargetService,
+    resolve_compute_target_id,
+)
 from ..application.jobs.models import JOB_STATUSES, JobStatus, job_rows
-from ..application.jobs.service import JobService
+from ..application.jobs.service import JobLogService, JobService
 from ..context import TreqsContext
+from ..errors import ConfigError
+from ..models import AuthState, RepoContext
 from ..output import emit_json, render_table
 from .shared import load_project_api_context
 
@@ -84,3 +91,99 @@ def jobs_show_command(state: TreqsContext, job_id: str) -> None:
         click.echo(f"Created: {job.createdAt}")
     if job.updatedAt:
         click.echo(f"Updated: {job.updatedAt}")
+
+
+@jobs_group.command("republish-lineage")
+@click.argument("job_id")
+@click.pass_obj
+def jobs_republish_lineage_command(state: TreqsContext, job_id: str) -> None:
+    """Re-publish a job's stored lineage package to GLaaS.
+
+    Recovers a lineage publication that failed transiently (for example a GLaaS
+    outage) from the package stored at upload time — no need to re-run training.
+    """
+    auth_state, repo_context = load_project_api_context(state)
+    with TreqsApiClient(auth_state.api_url) as client:
+        result = JobService(client, auth_state, repo_context).republish_lineage(job_id)
+
+    if state.json_output:
+        emit_json(result)
+        return
+
+    click.echo(f"Publication status: {result.publication_status}")
+    if result.published_session_hash:
+        click.echo(f"Session: {result.published_session_hash}")
+    if result.published_url:
+        click.echo(f"Lineage URL: {result.published_url}")
+
+
+@jobs_group.command("logs")
+@click.argument("job_id")
+@click.option("--target", "target", help="Compute target ID or name. Defaults to the job's target.")
+@click.option("--follow", is_flag=True, help="Keep polling until the job's logs are complete.")
+@click.option(
+    "--poll-timeout-ms",
+    type=click.IntRange(1000, 60000),
+    default=30000,
+    show_default=True,
+    help="Server-side long-poll timeout per request, in milliseconds.",
+)
+@click.pass_obj
+def jobs_logs_command(
+    state: TreqsContext,
+    job_id: str,
+    target: str | None,
+    follow: bool,
+    poll_timeout_ms: int,
+) -> None:
+    """Print logs for a job, optionally following until complete."""
+    auth_state, repo_context = load_project_api_context(state)
+    scope = ComputeTargetScope(
+        owner_username=repo_context.owner_username,
+        current_username=repo_context.current_username,
+    )
+    with TreqsApiClient(auth_state.api_url) as client:
+        target_id = _resolve_log_target_id(
+            client, auth_state, repo_context, scope, job_id, target
+        )
+        log_service = JobLogService(client, auth_state, scope)
+        cursor = 0
+        while True:
+            result = log_service.poll(
+                target_id,
+                job_id,
+                from_sequence=cursor,
+                timeout_ms=poll_timeout_ms,
+            )
+            for chunk in result.chunks:
+                click.echo(chunk.content, nl=False)
+            cursor = result.nextSequence
+            if not result.hasMore:
+                break
+            if not follow:
+                break
+
+
+def _resolve_log_target_id(
+    client: TreqsApiClient,
+    auth_state: AuthState,
+    repo_context: RepoContext,
+    scope: ComputeTargetScope,
+    job_id: str,
+    target: str | None,
+) -> str:
+    if target is not None:
+        try:
+            return resolve_compute_target_id(
+                ComputeTargetService(client, auth_state, scope).list(),
+                target,
+            )
+        except ValueError as exc:
+            raise ConfigError(str(exc)) from exc
+
+    job = JobService(client, auth_state, repo_context).get(job_id)
+    if not job.computeTargetId:
+        raise ConfigError(
+            f"Job {job_id} has no compute target. Pass --target to poll logs explicitly."
+        )
+    return job.computeTargetId

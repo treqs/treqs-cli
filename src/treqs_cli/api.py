@@ -6,8 +6,14 @@ from typing import Any, cast
 
 import httpx
 
-from .application.compute.models import ComputeTarget
-from .application.jobs.models import ProjectJobs, TrainingJob
+from .application.compute.models import ComputeTarget, RegistrationCode
+from .application.jobs.models import (
+    LineageRepublishResult,
+    LogPollResult,
+    ProjectJobs,
+    TrainingJob,
+)
+from .application.projects.models import Project
 from .application.requests.models import TrainingRequest, TrainingRequestQueueResult
 from .errors import ApiError, AuthError
 from .models import AccessContext, AuthState, DeviceAuthorizationSession
@@ -203,6 +209,20 @@ class TreqsApiClient:
         payload = self.request_json("POST", path, auth_state=auth_state)
         return TrainingRequestQueueResult.model_validate(_unwrap_data(payload))
 
+    def create_project(
+        self,
+        auth_state: AuthState,
+        path: str,
+        json_payload: dict[str, object],
+    ) -> Project:
+        payload = self.request_json(
+            "POST",
+            path,
+            auth_state=auth_state,
+            json_payload=json_payload,
+        )
+        return Project.model_validate(_unwrap_data(payload))
+
     def list_compute_targets(
         self,
         auth_state: AuthState,
@@ -213,6 +233,43 @@ class TreqsApiClient:
         params = {"include": "agent"} if include_agent else None
         payload = self.request_json("GET", path, auth_state=auth_state, params=params)
         return [ComputeTarget.model_validate(item) for item in _unwrap_list_data(payload)]
+
+    def create_compute_target(
+        self,
+        auth_state: AuthState,
+        path: str,
+        json_payload: dict[str, object],
+    ) -> ComputeTarget:
+        payload = self.request_json(
+            "POST",
+            path,
+            auth_state=auth_state,
+            json_payload=json_payload,
+        )
+        return ComputeTarget.model_validate(_unwrap_data(payload))
+
+    def set_compute_target_secret(
+        self,
+        auth_state: AuthState,
+        path: str,
+        json_payload: dict[str, object],
+    ) -> None:
+        payload = self.request_json(
+            "PUT",
+            path,
+            auth_state=auth_state,
+            json_payload=json_payload,
+        )
+        if payload.get("success") is not True:
+            raise ApiError(_error_message(payload, None))
+
+    def create_registration_code(
+        self,
+        auth_state: AuthState,
+        path: str,
+    ) -> RegistrationCode:
+        payload = self.request_json("POST", path, auth_state=auth_state)
+        return RegistrationCode.model_validate(_unwrap_data(payload))
 
     def list_project_jobs(
         self,
@@ -241,6 +298,34 @@ class TreqsApiClient:
         payload = self.request_json("GET", path, auth_state=auth_state)
         return TrainingJob.model_validate(_unwrap_data(payload))
 
+    def republish_job_lineage(
+        self,
+        auth_state: AuthState,
+        path: str,
+    ) -> LineageRepublishResult:
+        payload = self.request_json("POST", path, auth_state=auth_state)
+        return LineageRepublishResult.model_validate(_unwrap_data(payload))
+
+    def poll_job_logs(
+        self,
+        auth_state: AuthState,
+        path: str,
+        *,
+        from_sequence: int,
+        timeout_ms: int,
+    ) -> LogPollResult:
+        # Keep the HTTP read timeout safely above the server-side long-poll timeout so
+        # the request does not abort before the API returns.
+        http_timeout = timeout_ms / 1000.0 + 15.0
+        payload = self.request_json(
+            "GET",
+            path,
+            auth_state=auth_state,
+            params={"from": from_sequence, "timeout": timeout_ms},
+            timeout=http_timeout,
+        )
+        return LogPollResult.model_validate(_unwrap_data(payload))
+
     def request_json(
         self,
         method: str,
@@ -249,11 +334,16 @@ class TreqsApiClient:
         auth_state: AuthState | None = None,
         json_payload: dict[str, Any] | None = None,
         params: dict[str, Any] | None = None,
+        timeout: float | None = None,
     ) -> dict[str, Any]:
         headers = {"Accept": "application/json"}
         if auth_state is not None:
             token_type = auth_state.token_type or "Bearer"
             headers["Authorization"] = f"{token_type} {auth_state.access_token}"
+
+        request_kwargs: dict[str, Any] = {}
+        if timeout is not None:
+            request_kwargs["timeout"] = timeout
 
         try:
             response = self._client.request(
@@ -262,6 +352,7 @@ class TreqsApiClient:
                 json=json_payload,
                 params=params,
                 headers=headers,
+                **request_kwargs,
             )
         except httpx.HTTPError as exc:
             raise ApiError(f"Failed to connect to TReqs API: {exc}") from exc
