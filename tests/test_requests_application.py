@@ -42,6 +42,15 @@ def test_create_input_builds_api_payload_and_forbids_unknown_fields() -> None:
         TrainingRequestCreateInput.model_validate({"title": "Train model", "unexpected": "field"})
 
 
+def test_workflow_self_publishes_detection() -> None:
+    from treqs_cli.commands.requests import workflow_self_publishes
+
+    assert workflow_self_publishes("publish: |\n  roar register --public --yes\n")
+    assert workflow_self_publishes("cmd: roar   register model.npz")
+    assert not workflow_self_publishes("train: roar run -- python train.py\n")
+    assert not workflow_self_publishes("echo registered lineage")
+
+
 def test_create_input_includes_lineage_mode_when_set() -> None:
     create_input = TrainingRequestCreateInput(
         title="Private run",

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from typing import cast
 
 import click
@@ -112,6 +113,8 @@ def requests_create_command(
     """Create a training request in the repo-local project context."""
     if lineage_mode is not None and not workflow_path:
         raise ConfigError("--lineage-mode requires --workflow-path.")
+    if workflow_path and lineage_mode is None:
+        _warn_if_workflow_self_publishes(state, workflow_path)
     auth_state, repo_context = load_project_api_context(state)
     with TreqsApiClient(auth_state.api_url) as client:
         compute_target_id = _resolve_compute_target(
@@ -339,6 +342,33 @@ def requests_queue_command(state: TreqsContext, request_id: str) -> None:
         click.echo(f"Job: {result.jobId}")
     if result.warningMessage:
         click.echo(f"Warning: {result.warningMessage}")
+
+
+def workflow_self_publishes(content: str) -> bool:
+    """True when a workflow publishes lineage in-pod via `roar register`."""
+    return re.search(r"\broar\s+register\b", content) is not None
+
+
+def _warn_if_workflow_self_publishes(state: TreqsContext, workflow_path: str) -> None:
+    """Best-effort convergence nudge (reads the local workflow file if present).
+
+    Platform-orchestrated publication should be decided on the training request
+    (--lineage-mode), not hardcoded in the workflow: the in-pod `roar register`
+    publish is anonymous-only, needs roar features not yet in a PyPI release, and
+    gets none of the platform's publication tracking or recovery.
+    """
+    try:
+        content = (state.repo_root / workflow_path).read_text(encoding="utf-8")
+    except OSError:
+        return
+    if workflow_self_publishes(content):
+        click.echo(
+            "Warning: this workflow publishes lineage in-pod via 'roar register' and no "
+            "--lineage-mode was given. In-pod publishing is anonymous-only and requires "
+            "unreleased roar features; prefer --lineage-mode "
+            "{private|public|public_anonymous} (native, project-linked publication).",
+            err=True,
+        )
 
 
 def _resolve_compute_target(
