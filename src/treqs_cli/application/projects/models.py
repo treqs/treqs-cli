@@ -81,9 +81,7 @@ def validate_slug(slug: str) -> str:
     if len(token) > 100:
         raise ValueError("Project slug must be less than 100 characters.")
     if not _SLUG_PATTERN.match(token):
-        raise ValueError(
-            "Project slug must contain only lowercase letters, numbers, and hyphens."
-        )
+        raise ValueError("Project slug must contain only lowercase letters, numbers, and hyphens.")
     return token
 
 
