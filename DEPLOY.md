@@ -59,6 +59,11 @@ cd /tmp
 
 ## Validate with TestPyPI
 
+GitHub only enables manual dispatch after the workflow file exists on the
+default branch. For the initial setup, merge the workflow-only change first;
+after that, choose the candidate release branch in the workflow's branch
+selector.
+
 1. Set a unique version in both `pyproject.toml` and
    `src/treqs_cli/__init__.py`. TestPyPI does not allow replacing files for an
    existing version.
