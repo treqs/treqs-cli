@@ -18,9 +18,9 @@ def test_lazy_registry_is_built_from_command_specs() -> None:
 def test_help_groups_are_built_from_command_specs() -> None:
     help_groups = dict(build_help_groups())
 
-    assert help_groups["Start Here"] == ("login", "whoami")
+    assert help_groups["Start Here"] == ("login", "whoami", "doctor")
     assert help_groups["Project Context"] == ("projects", "project")
-    assert help_groups["Training Requests"] == ("tr",)
+    assert help_groups["Training Requests"] == ("tr", "run")
     assert help_groups["Compute"] == ("compute",)
     assert help_groups["Jobs"] == ("jobs",)
     assert help_groups["Account"] == ("logout",)

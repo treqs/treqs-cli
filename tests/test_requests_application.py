@@ -11,6 +11,8 @@ from treqs_cli.application.requests.models import (
     TrainingRequestListFilters,
     TrainingRequestOpenInput,
     TrainingRequestQueueResult,
+    TrainingRequestReviewInput,
+    TrainingRequestReviewResult,
     TrainingRequestUpdateInput,
     training_request_rows,
 )
@@ -27,6 +29,7 @@ def test_create_input_builds_api_payload_and_forbids_unknown_fields() -> None:
         compute_target_id="ct-1",
         workflow_snapshot_id="snapshot-1",
         source_branch="tb/mnist-e2e-story",
+        source_commit="0123456789abcdef0123456789abcdef01234567",
     )
 
     assert create_input.to_api_payload() == {
@@ -36,7 +39,11 @@ def test_create_input_builds_api_payload_and_forbids_unknown_fields() -> None:
         "workflowPath": ".github/workflows/train.yml",
         "computeSelection": {"targetId": "ct-1"},
         "workflowSnapshotId": "snapshot-1",
-        "codeConfig": {"sourceBranch": "tb/mnist-e2e-story"},
+        "codeConfig": {
+            "sourceBranch": "tb/mnist-e2e-story",
+            "sourceCommit": "0123456789abcdef0123456789abcdef01234567",
+            "pinMode": "commit",
+        },
     }
     with pytest.raises(ValidationError):
         TrainingRequestCreateInput.model_validate({"title": "Train model", "unexpected": "field"})
@@ -165,6 +172,10 @@ def test_training_request_service_builds_owner_scoped_paths() -> None:
         ),
     )
     queued = service.queue("request-1")
+    reviewed = service.review(
+        "request-1",
+        TrainingRequestReviewInput(status="approved", content="Smoke profile looks good"),
+    )
 
     assert listed[0].id == "request-1"
     assert created.id == "request-2"
@@ -172,6 +183,7 @@ def test_training_request_service_builds_owner_scoped_paths() -> None:
     assert fetched.id == "request-1"
     assert opened.status == "open"
     assert queued.jobId == "job-1"
+    assert reviewed.review.status == "approved"
     assert client.calls == [
         (
             "list",
@@ -210,6 +222,11 @@ def test_training_request_service_builds_owner_scoped_paths() -> None:
         (
             "queue",
             "/api/v1/user/orgs/acme/projects/mnist/training-requests/request-1/queue",
+        ),
+        (
+            "review",
+            "/api/v1/user/orgs/acme/projects/mnist/training-requests/request-1/reviews",
+            {"status": "approved", "content": "Smoke profile looks good"},
         ),
     ]
 
@@ -310,4 +327,26 @@ class _FakeTrainingRequestClient:
                 projectSlug="mnist",
             ),
             jobId="job-1",
+        )
+
+    def submit_training_request_review(
+        self,
+        _auth_state: AuthState,
+        path: str,
+        json_payload: dict[str, object],
+    ) -> TrainingRequestReviewResult:
+        self.calls.append(("review", path, json_payload))
+        return TrainingRequestReviewResult.model_validate(
+            {
+                "review": {
+                    "id": "review-1",
+                    "status": json_payload["status"],
+                    "content": json_payload.get("content"),
+                },
+                "trainingRequest": {
+                    "id": "request-1",
+                    "title": "Train model",
+                    "status": "open",
+                },
+            }
         )

@@ -65,6 +65,7 @@ def test_parse_code_config_handles_url_variants() -> None:
         parse_code_config("github:https://github.com/owner/repo.git").to_api_payload() == expected
     )
     assert parse_code_config("github:owner/repo").to_api_payload() == expected
+    assert parse_code_config("github:git@github.com:owner/repo.git").to_api_payload() == expected
     assert (
         parse_code_config(
             "github:https://github.com/owner/repo", access_mode="github_app"
@@ -97,8 +98,10 @@ def test_project_service_builds_owner_scoped_path() -> None:
     project = ProjectService(client, auth_state, scope).create(
         ProjectCreateInput(name="MNIST", slug="mnist")
     )
+    fetched = ProjectService(client, auth_state, scope).get("mnist")
 
     assert project.id == "project-1"
+    assert fetched.slug == "mnist"
     assert projects_path(scope) == "/api/v1/user/orgs/acme/projects"
     assert client.calls == [
         (
@@ -106,6 +109,7 @@ def test_project_service_builds_owner_scoped_path() -> None:
             "/api/v1/user/orgs/acme/projects",
             {"name": "MNIST", "slug": "mnist", "visibility": "private"},
         ),
+        ("get", "/api/v1/user/orgs/acme/projects/mnist"),
     ]
 
 
@@ -158,4 +162,17 @@ class _FakeProjectClient:
             slug=str(json_payload["slug"]),
             name=str(json_payload["name"]),
             visibility=str(json_payload["visibility"]),
+        )
+
+    def get_project(
+        self,
+        _auth_state: AuthState,
+        path: str,
+    ) -> Project:
+        self.calls.append(("get", path))
+        return Project(
+            id="project-1",
+            slug="mnist",
+            name="MNIST",
+            visibility="private",
         )

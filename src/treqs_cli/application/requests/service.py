@@ -12,6 +12,8 @@ from .models import (
     TrainingRequestListFilters,
     TrainingRequestOpenInput,
     TrainingRequestQueueResult,
+    TrainingRequestReviewInput,
+    TrainingRequestReviewResult,
     TrainingRequestUpdateInput,
 )
 
@@ -59,6 +61,13 @@ class TrainingRequestApi(Protocol):
         auth_state: AuthState,
         path: str,
     ) -> TrainingRequestQueueResult: ...
+
+    def submit_training_request_review(
+        self,
+        auth_state: AuthState,
+        path: str,
+        json_payload: dict[str, object],
+    ) -> TrainingRequestReviewResult: ...
 
 
 @dataclass(frozen=True)
@@ -111,6 +120,17 @@ class TrainingRequestService:
         return self.client.queue_training_request(
             self.auth_state,
             f"{training_request_path(self.repo_context, request_id)}/queue",
+        )
+
+    def review(
+        self,
+        request_id: str,
+        review_input: TrainingRequestReviewInput,
+    ) -> TrainingRequestReviewResult:
+        return self.client.submit_training_request_review(
+            self.auth_state,
+            f"{training_request_path(self.repo_context, request_id)}/reviews",
+            review_input.to_api_payload(),
         )
 
 

@@ -40,6 +40,13 @@ COMMAND_SPECS: tuple[CommandSpec, ...] = (
         help_section="Start Here",
     ),
     CommandSpec(
+        name="doctor",
+        module_path="treqs_cli.commands.doctor",
+        attr_name="doctor_command",
+        short_help="Validate project, Git source, workflow, and compute readiness.",
+        help_section="Start Here",
+    ),
+    CommandSpec(
         name="projects",
         module_path="treqs_cli.commands.projects",
         attr_name="projects_group",
@@ -65,6 +72,13 @@ COMMAND_SPECS: tuple[CommandSpec, ...] = (
         module_path="treqs_cli.commands.requests",
         attr_name="requests_group",
         short_help="Manage training requests for the current TReqs project.",
+        help_section="Training Requests",
+    ),
+    CommandSpec(
+        name="run",
+        module_path="treqs_cli.commands.run",
+        attr_name="run_command",
+        short_help="Create and launch a reproducible training request.",
         help_section="Training Requests",
     ),
     CommandSpec(

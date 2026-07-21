@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from collections.abc import Sequence
+import time
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from typing import Protocol
 from urllib.parse import quote
@@ -14,6 +15,8 @@ from .models import (
     ProjectJobs,
     TrainingJob,
 )
+
+TERMINAL_JOB_STATUSES = frozenset({"COMPLETED", "FAILED", "CANCELLED"})
 
 
 class JobsApi(Protocol):
@@ -125,6 +128,25 @@ class JobLogService:
             from_sequence=from_sequence,
             timeout_ms=timeout_ms,
         )
+
+
+def wait_for_terminal_job(
+    fetch_job: Callable[[], TrainingJob],
+    *,
+    timeout_seconds: float,
+    poll_interval_seconds: float = 5.0,
+    monotonic: Callable[[], float] = time.monotonic,
+    sleep: Callable[[float], None] = time.sleep,
+) -> TrainingJob:
+    """Poll a job until it reaches a terminal state or the timeout expires."""
+    deadline = monotonic() + timeout_seconds
+    while True:
+        job = fetch_job()
+        if job.status in TERMINAL_JOB_STATUSES:
+            return job
+        if monotonic() >= deadline:
+            raise TimeoutError(f"Timed out after {timeout_seconds:g}s waiting for job {job.id}")
+        sleep(poll_interval_seconds)
 
 
 def project_jobs_path(repo_context: RepoContext) -> str:

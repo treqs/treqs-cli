@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import re
-from typing import Literal
+from typing import Any, Literal
 from urllib.parse import urlparse
 
 from pydantic import BaseModel, ConfigDict
@@ -64,6 +64,7 @@ class Project(BaseModel):
     visibility: str | None = None
     description: str | None = None
     ownerId: str | None = None
+    codeConfig: dict[str, Any] | None = None
     createdAt: str | None = None
     updatedAt: str | None = None
 
@@ -114,6 +115,8 @@ def parse_code_config(
 
 def _normalize_github_url(value: str) -> tuple[str, str]:
     candidate = value
+    if candidate.startswith("git@github.com:"):
+        candidate = f"https://github.com/{candidate.removeprefix('git@github.com:')}"
     if not candidate.startswith(("http://", "https://")):
         candidate = candidate.removeprefix("github.com/")
         candidate = f"https://github.com/{candidate}"
