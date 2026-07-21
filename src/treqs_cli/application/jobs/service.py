@@ -136,6 +136,5 @@ def job_logs_poll_path(
     return owner_path(
         scope.owner_username,
         scope.current_username,
-        f"/compute-targets/{quote(target_id, safe='')}"
-        f"/jobs/{quote(job_id, safe='')}/logs/poll",
+        f"/compute-targets/{quote(target_id, safe='')}/jobs/{quote(job_id, safe='')}/logs/poll",
     )

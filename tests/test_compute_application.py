@@ -159,12 +159,15 @@ def test_compute_target_create_input_pins_roar_ref_for_source_build() -> None:
     )
 
     resources = create_input.to_api_payload()["resources"]
+    assert isinstance(resources, dict)
     assert resources["installRoar"] is True
     assert resources["roarRef"] == "main"
     # No roarRef -> key omitted (PyPI default install).
-    assert "roarRef" not in ComputeTargetCreateInput(
+    default_resources = ComputeTargetCreateInput(
         name="x", kind="on-demand", type="runpod", instance_type="cpu3c", install_roar=True
     ).to_api_payload()["resources"]
+    assert isinstance(default_resources, dict)
+    assert "roarRef" not in default_resources
 
 
 def test_secret_name_validation_and_assignment_parsing() -> None:

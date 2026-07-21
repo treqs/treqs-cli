@@ -143,9 +143,7 @@ def jobs_logs_command(
         current_username=repo_context.current_username,
     )
     with TreqsApiClient(auth_state.api_url) as client:
-        target_id = _resolve_log_target_id(
-            client, auth_state, repo_context, scope, job_id, target
-        )
+        target_id = _resolve_log_target_id(client, auth_state, repo_context, scope, job_id, target)
         log_service = JobLogService(client, auth_state, scope)
         cursor = 0
         while True:

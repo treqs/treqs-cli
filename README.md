@@ -4,6 +4,31 @@
 authentication, identity, project discovery, repo-local project context, training
 request lifecycle commands, compute target discovery, and project job inspection.
 
+## Installation
+
+Install `treqs-cli` in an isolated tool environment (Python 3.10+):
+
+```bash
+uv tool install treqs-cli
+# or
+pipx install treqs-cli
+```
+
+To install it in an existing environment instead:
+
+```bash
+uv pip install treqs-cli
+# or
+pip install treqs-cli
+```
+
+Verify the console script after installation:
+
+```bash
+treqs --version
+treqs --help
+```
+
 ## Development
 
 ```bash

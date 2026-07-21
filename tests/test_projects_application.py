@@ -66,8 +66,9 @@ def test_parse_code_config_handles_url_variants() -> None:
     )
     assert parse_code_config("github:owner/repo").to_api_payload() == expected
     assert (
-        parse_code_config("github:https://github.com/owner/repo", access_mode="github_app")
-        .to_api_payload()["accessMode"]
+        parse_code_config(
+            "github:https://github.com/owner/repo", access_mode="github_app"
+        ).to_api_payload()["accessMode"]
         == "github_app"
     )
 
