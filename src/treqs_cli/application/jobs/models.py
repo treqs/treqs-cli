@@ -45,6 +45,8 @@ class TrainingJob(BaseModel):
     agentId: str | None = None
     status: str
     trainingRequest: JobTrainingRequest | None = None
+    lineagePublishedUrl: str | None = None
+    lineagePublishedSessionHash: str | None = None
     createdAt: str | None = None
     updatedAt: str | None = None
     startedAt: str | None = None

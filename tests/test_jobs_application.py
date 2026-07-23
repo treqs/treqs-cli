@@ -47,6 +47,25 @@ def test_job_rows_and_filtering() -> None:
     }
 
 
+def test_training_job_parses_lineage_publication_fields() -> None:
+    job = TrainingJob.model_validate(
+        {
+            "id": "job-1",
+            "status": "COMPLETED",
+            "lineagePublishedUrl": "https://glaas.ai/dag/abc123",
+            "lineagePublishedSessionHash": "abc123",
+        }
+    )
+
+    assert job.lineagePublishedUrl == "https://glaas.ai/dag/abc123"
+    assert job.lineagePublishedSessionHash == "abc123"
+
+    unpublished = TrainingJob(id="job-2", status="QUEUED")
+
+    assert unpublished.lineagePublishedUrl is None
+    assert unpublished.lineagePublishedSessionHash is None
+
+
 def test_job_service_builds_project_path_and_finds_job() -> None:
     client = _FakeJobsClient()
     auth_state = AuthState(api_url="https://api.treqs.ai", access_token="access-token")
