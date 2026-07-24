@@ -91,6 +91,22 @@ def test_orgs_list_reports_when_user_has_no_orgs(monkeypatch: Any, tmp_path: Pat
     assert "do not belong to any organizations" in result.output
 
 
+def test_whoami_names_each_owner_with_type_role_and_projects(
+    monkeypatch: Any,
+    tmp_path: Path,
+) -> None:
+    env = _setup(monkeypatch, tmp_path, _access_context_payload())
+    runner = CliRunner()
+
+    result = runner.invoke(cli, ["whoami"], env=env, catch_exceptions=False)
+
+    assert result.exit_code == 0, result.output
+    assert "Owners: 3" in result.output
+    assert "  - trevor (user, owner, projects=1)" in result.output
+    assert "  - acme (organization, admin, projects=2)" in result.output
+    assert "  - beta (organization, member, projects=0)" in result.output
+
+
 def _access_context_payload() -> dict[str, Any]:
     return {
         "user": {

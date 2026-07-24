@@ -80,4 +80,7 @@ def whoami_command(state: TreqsContext) -> None:
     click.echo(f"User ID: {user.id}")
     click.echo(f"API: {auth_state.api_url}")
     click.echo(f"Owners: {len(access_context.owners)}")
+    for owner in access_context.owners:
+        owner_projects = len(access_context.projects_by_owner.get(owner.id, []))
+        click.echo(f"  - {owner.username} ({owner.type}, {owner.role}, projects={owner_projects})")
     click.echo(f"Projects: {project_count}")
