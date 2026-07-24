@@ -3,6 +3,7 @@ from __future__ import annotations
 import click
 
 from ..context import TreqsContext
+from ..help_text import examples
 from ..models import AccessContext, AccessOwner
 from ..output import emit_json, render_table
 from .shared import load_access_context
@@ -13,7 +14,13 @@ def orgs_group() -> None:
     """List TReqs organizations you belong to."""
 
 
-@orgs_group.command("list")
+@orgs_group.command(
+    "list",
+    epilog=examples(
+        "treqs orgs list",
+        "treqs --json orgs list",
+    ),
+)
 @click.pass_obj
 def orgs_list_command(state: TreqsContext) -> None:
     """List organizations you belong to.

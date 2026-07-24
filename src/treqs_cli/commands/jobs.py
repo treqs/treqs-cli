@@ -13,6 +13,7 @@ from ..application.jobs.models import JOB_STATUSES, JobStatus, job_rows
 from ..application.jobs.service import JobLogService, JobService
 from ..context import OwnerScope, TreqsContext
 from ..errors import ConfigError
+from ..help_text import examples
 from ..models import AuthState, RepoContext
 from ..output import emit_json, render_table
 from .shared import load_project_api_context
@@ -20,10 +21,22 @@ from .shared import load_project_api_context
 
 @click.group("jobs")
 def jobs_group() -> None:
-    """Inspect jobs for the current TReqs project."""
+    """Inspect jobs for the current TReqs project.
+
+    All jobs commands are repo-bound: run them inside a git repo bound to a
+    project with `treqs project use`. Jobs are created by queueing training
+    requests (`treqs tr queue`).
+    """
 
 
-@jobs_group.command("list")
+@jobs_group.command(
+    "list",
+    epilog=examples(
+        "treqs jobs list",
+        "treqs jobs list --status RUNNING --status QUEUED",
+        "treqs --json jobs list --limit 50",
+    ),
+)
 @click.option(
     "--status",
     "statuses",
@@ -63,11 +76,21 @@ def jobs_list_command(
     )
 
 
-@jobs_group.command("show")
+@jobs_group.command(
+    "show",
+    epilog=examples(
+        "treqs jobs show <job-id>",
+        "treqs --json jobs show <job-id>",
+    ),
+)
 @click.argument("job_id")
 @click.pass_obj
 def jobs_show_command(state: TreqsContext, job_id: str) -> None:
-    """Show one job from the repo-local project context."""
+    """Show one job from the repo-local project context.
+
+    JOB_ID is the job ID shown by `treqs jobs list` or printed by
+    `treqs tr queue`.
+    """
     auth_state, repo_context = load_project_api_context(state)
     with TreqsApiClient(auth_state.api_url) as client:
         job = JobService(client, auth_state, repo_context).get(job_id)
@@ -92,14 +115,20 @@ def jobs_show_command(state: TreqsContext, job_id: str) -> None:
         click.echo(f"Updated: {job.updatedAt}")
 
 
-@jobs_group.command("republish-lineage")
+@jobs_group.command(
+    "republish-lineage",
+    epilog=examples(
+        "treqs jobs republish-lineage <job-id>",
+    ),
+)
 @click.argument("job_id")
 @click.pass_obj
 def jobs_republish_lineage_command(state: TreqsContext, job_id: str) -> None:
     """Re-publish a job's stored lineage package to GLaaS.
 
-    Recovers a lineage publication that failed transiently (for example a GLaaS
-    outage) from the package stored at upload time — no need to re-run training.
+    JOB_ID is the job ID shown by `treqs jobs list`. Recovers a lineage
+    publication that failed transiently (for example a GLaaS outage) from the
+    package stored at upload time — no need to re-run training.
     """
     auth_state, repo_context = load_project_api_context(state)
     with TreqsApiClient(auth_state.api_url) as client:
@@ -116,7 +145,14 @@ def jobs_republish_lineage_command(state: TreqsContext, job_id: str) -> None:
         click.echo(f"Lineage URL: {result.published_url}")
 
 
-@jobs_group.command("logs")
+@jobs_group.command(
+    "logs",
+    epilog=examples(
+        "treqs jobs logs <job-id>",
+        "treqs jobs logs <job-id> --follow",
+        "treqs jobs logs <job-id> --target gpu-box --follow",
+    ),
+)
 @click.argument("job_id")
 @click.option("--target", "target", help="Compute target ID or name. Defaults to the job's target.")
 @click.option("--follow", is_flag=True, help="Keep polling until the job's logs are complete.")
@@ -135,7 +171,11 @@ def jobs_logs_command(
     follow: bool,
     poll_timeout_ms: int,
 ) -> None:
-    """Print logs for a job, optionally following until complete."""
+    """Print logs for a job, optionally following until complete.
+
+    JOB_ID is the job ID shown by `treqs jobs list` or printed by
+    `treqs tr queue`.
+    """
     auth_state, repo_context = load_project_api_context(state)
     scope = OwnerScope(
         owner_username=repo_context.owner_username,

@@ -22,6 +22,7 @@ from ..context import (
     resolve_project_selection,
 )
 from ..errors import ConfigError
+from ..help_text import examples
 from ..models import AccessContext, AccessOwner, AccessProject
 from ..output import emit_json, render_table
 from .shared import (
@@ -37,10 +38,21 @@ def projects_group() -> None:
     """List accessible TReqs projects."""
 
 
-@projects_group.command("list")
+@projects_group.command(
+    "list",
+    epilog=examples(
+        "treqs projects list",
+        "treqs --json projects list",
+    ),
+)
 @click.pass_obj
 def projects_list_command(state: TreqsContext) -> None:
-    """List projects available to the authenticated user."""
+    """List projects available to the authenticated user.
+
+    Shows projects across every owner you can access, personal and
+    organization-owned. The SCOPE column is <owner>/<project> and is valid
+    input for `treqs project use`.
+    """
     _auth_state, access_context = load_access_context(state)
     rows = _project_rows(access_context)
     if state.json_output:
@@ -57,7 +69,15 @@ def projects_list_command(state: TreqsContext) -> None:
     )
 
 
-@projects_group.command("create")
+@projects_group.command(
+    "create",
+    epilog=examples(
+        'treqs projects create "MNIST Digits"',
+        'treqs projects create "MNIST Digits" --slug mnist --visibility public',
+        'treqs projects create "Team Model" --owner acme',
+        "treqs projects create Vision --code-config github:https://github.com/acme/vision",
+    ),
+)
 @click.argument("name")
 @click.option("--slug", help="Project slug. Defaults to a slugified name.")
 @click.option(
@@ -98,7 +118,12 @@ def projects_create_command(
     default_branch: str,
     owner: str | None,
 ) -> None:
-    """Create a project for a TReqs owner."""
+    """Create a project for a TReqs owner.
+
+    NAME is the human-readable project name; the project slug defaults to a
+    slugified NAME unless --slug is given. Use --owner to create the project
+    under an organization from `treqs orgs list`.
+    """
     auth_state, access_context = load_access_context(state)
     scope = resolve_owner_scope(state, access_context, owner)
 
@@ -143,11 +168,26 @@ def project_group() -> None:
     """Manage repo-local TReqs project context."""
 
 
-@project_group.command("use")
+@project_group.command(
+    "use",
+    epilog=examples(
+        "treqs project use trevor/mnist",
+        "treqs project use acme/mnist",
+        "treqs project use mnist",
+    ),
+)
 @click.argument("selection")
 @click.pass_obj
 def project_use_command(state: TreqsContext, selection: str) -> None:
-    """Set this repo's TReqs project context."""
+    """Set this repo's TReqs project context.
+
+    SELECTION is <owner>/<project> (see `treqs projects list` for valid
+    scopes), or a bare project slug, name, or ID when it is unambiguous
+    across your owners. The owner may be your username or an organization.
+    Read-only projects are rejected. The context is saved to
+    .treqs/config.toml and drives repo-bound commands (tr, jobs) plus the
+    default owner scope of owner-scoped commands.
+    """
     require_git_repo(state)
     auth_state, access_context = load_access_context(state)
     owner, project = resolve_project_selection(access_context, selection)
@@ -167,7 +207,13 @@ def project_use_command(state: TreqsContext, selection: str) -> None:
     click.echo(f"Saved to {path}.")
 
 
-@project_group.command("status")
+@project_group.command(
+    "status",
+    epilog=examples(
+        "treqs project status",
+        "treqs --json project status",
+    ),
+)
 @click.pass_obj
 def project_status_command(state: TreqsContext) -> None:
     """Show the repo-local TReqs project context."""
@@ -182,7 +228,12 @@ def project_status_command(state: TreqsContext) -> None:
     click.echo(f"API: {context.api_url}")
 
 
-@project_group.command("clear")
+@project_group.command(
+    "clear",
+    epilog=examples(
+        "treqs project clear",
+    ),
+)
 @click.pass_obj
 def project_clear_command(state: TreqsContext) -> None:
     """Clear the repo-local TReqs project context."""

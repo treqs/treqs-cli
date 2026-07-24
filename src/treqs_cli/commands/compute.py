@@ -15,6 +15,7 @@ from ..application.compute.service import (
 )
 from ..context import OwnerScope, TreqsContext
 from ..errors import ConfigError, TreqsCliError
+from ..help_text import examples
 from ..output import emit_json, render_table
 from .shared import load_access_context, owner_option, resolve_owner_scope
 
@@ -29,7 +30,15 @@ def compute_targets_group() -> None:
     """Inspect compute targets for the current TReqs owner."""
 
 
-@compute_targets_group.command("list")
+@compute_targets_group.command(
+    "list",
+    epilog=examples(
+        "treqs compute targets list",
+        "treqs compute targets list --owner acme",
+        "treqs compute targets list --all",
+        "treqs --json compute targets list --include-agent",
+    ),
+)
 @click.option("--include-agent", is_flag=True, help="Include registered agent details.")
 @owner_option
 @click.option(
@@ -93,7 +102,15 @@ def compute_targets_list_command(
         render_table(compute_target_rows(targets), headers)
 
 
-@compute_targets_group.command("create")
+@compute_targets_group.command(
+    "create",
+    epilog=examples(
+        "treqs compute targets create --name gpu-box",
+        "treqs compute targets create --name team-gpu --owner acme",
+        "treqs compute targets create --kind on-demand --name burst --type runpod \\",
+        "    --instance-type cpu3c",
+    ),
+)
 @click.option(
     "--kind",
     type=click.Choice(["dedicated", "on-demand"]),
@@ -196,7 +213,13 @@ def compute_secrets_group() -> None:
     """Manage compute target secrets for the current TReqs owner."""
 
 
-@compute_secrets_group.command("set")
+@compute_secrets_group.command(
+    "set",
+    epilog=examples(
+        "treqs compute secrets set --target gpu-box WANDB_API_KEY=abc123",
+        "treqs compute secrets set --target gpu-box --owner acme HF_TOKEN=hf_x REGION=us",
+    ),
+)
 @click.option("--target", "target", required=True, help="Compute target ID or name.")
 @owner_option
 @click.argument("assignments", nargs=-1, required=True)
@@ -207,7 +230,12 @@ def compute_secrets_set_command(
     owner: str | None,
     assignments: tuple[str, ...],
 ) -> None:
-    """Set one or more KEY=VALUE secrets on a compute target."""
+    """Set one or more KEY=VALUE secrets on a compute target.
+
+    ASSIGNMENTS are KEY=VALUE pairs, separated by spaces. --target accepts a
+    compute target ID, a unique name, or a unique ID prefix from
+    `treqs compute targets list`.
+    """
     auth_state, access_context = load_access_context(state)
     scope = resolve_owner_scope(state, access_context, owner)
 
@@ -255,7 +283,13 @@ def compute_targets_registration_code_group() -> None:
     """Manage agent registration codes for compute targets."""
 
 
-@compute_targets_registration_code_group.command("create")
+@compute_targets_registration_code_group.command(
+    "create",
+    epilog=examples(
+        "treqs compute targets registration-code create --target gpu-box",
+        "treqs compute targets registration-code create --target gpu-box --owner acme",
+    ),
+)
 @click.option("--target", "target", required=True, help="Compute target ID or name.")
 @owner_option
 @click.pass_obj
@@ -264,7 +298,12 @@ def compute_targets_registration_code_create_command(
     target: str,
     owner: str | None,
 ) -> None:
-    """Create an agent registration code for a compute target."""
+    """Create an agent registration code for a compute target.
+
+    Prints a one-time code used to register a treqs-agent on the target
+    machine. --target accepts a compute target ID, a unique name, or a
+    unique ID prefix from `treqs compute targets list`.
+    """
     auth_state, access_context = load_access_context(state)
     scope = resolve_owner_scope(state, access_context, owner)
     with TreqsApiClient(auth_state.api_url) as client:
