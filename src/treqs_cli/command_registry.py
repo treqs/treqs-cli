@@ -16,6 +16,7 @@ class CommandSpec:
 HELP_SECTION_ORDER: tuple[str, ...] = (
     "Start Here",
     "Project Context",
+    "Organizations",
     "Training Requests",
     "Compute",
     "Jobs",
@@ -51,6 +52,13 @@ COMMAND_SPECS: tuple[CommandSpec, ...] = (
         attr_name="project_group",
         short_help="Manage repo-local TReqs project context.",
         help_section="Project Context",
+    ),
+    CommandSpec(
+        name="orgs",
+        module_path="treqs_cli.commands.orgs",
+        attr_name="orgs_group",
+        short_help="List TReqs organizations you belong to.",
+        help_section="Organizations",
     ),
     CommandSpec(
         name="tr",

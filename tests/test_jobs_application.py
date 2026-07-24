@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import pytest
 
-from treqs_cli.application.compute.service import ComputeTargetScope
 from treqs_cli.application.jobs.models import (
     LineageRepublishResult,
     LogChunk,
@@ -19,6 +18,7 @@ from treqs_cli.application.jobs.service import (
     project_job_path,
     project_jobs_path,
 )
+from treqs_cli.context import OwnerScope
 from treqs_cli.errors import ApiError
 from treqs_cli.models import AuthState, RepoContext
 
@@ -143,7 +143,7 @@ def test_job_service_reports_missing_job() -> None:
 def test_job_log_service_builds_compute_target_scoped_poll_path() -> None:
     client = _FakeJobLogClient()
     auth_state = AuthState(api_url="https://api.treqs.ai", access_token="access-token")
-    scope = ComputeTargetScope(owner_username="acme", current_username="trevor")
+    scope = OwnerScope(owner_username="acme", current_username="trevor")
 
     result = JobLogService(client, auth_state, scope).poll(
         "ct-1",

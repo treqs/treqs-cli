@@ -19,6 +19,7 @@ from ..application.requests.models import (
 from ..application.requests.service import TrainingRequestService
 from ..context import TreqsContext
 from ..errors import ConfigError
+from ..help_text import examples
 from ..models import AuthState, RepoContext
 from ..output import emit_json, render_table
 from .shared import load_project_api_context
@@ -26,10 +27,22 @@ from .shared import load_project_api_context
 
 @click.group("tr")
 def requests_group() -> None:
-    """Manage training requests for the current TReqs project."""
+    """Manage training requests for the current TReqs project.
+
+    All tr commands are repo-bound: run them inside a git repo bound to a
+    project with `treqs project use`. Typical lifecycle: create a draft,
+    open it with a compute target, then queue it as a job.
+    """
 
 
-@requests_group.command("list")
+@requests_group.command(
+    "list",
+    epilog=examples(
+        "treqs tr list",
+        "treqs tr list --status draft --status open",
+        "treqs --json tr list --limit 50",
+    ),
+)
 @click.option(
     "--status",
     "statuses",
@@ -72,7 +85,14 @@ def requests_list_command(
     )
 
 
-@requests_group.command("create")
+@requests_group.command(
+    "create",
+    epilog=examples(
+        'treqs tr create --title "Baseline run"',
+        'treqs tr create --title "Train v2" --workflow-path .treqs/workflows/train.yaml',
+        'treqs tr create --title "GPU run" --compute-target gpu-box --status open',
+    ),
+)
 @click.option("--title", required=True, help="Training request title.")
 @click.option("--description", help="Training request description.")
 @click.option(
@@ -143,11 +163,20 @@ def requests_create_command(
     click.echo(f"Project: {repo_context.owner_username}/{repo_context.project_slug}")
 
 
-@requests_group.command("show")
+@requests_group.command(
+    "show",
+    epilog=examples(
+        "treqs tr show <request-id>",
+        "treqs --json tr show <request-id>",
+    ),
+)
 @click.argument("request_id")
 @click.pass_obj
 def requests_show_command(state: TreqsContext, request_id: str) -> None:
-    """Show one training request from the repo-local project context."""
+    """Show one training request from the repo-local project context.
+
+    REQUEST_ID is the training request ID shown by `treqs tr list`.
+    """
     auth_state, repo_context = load_project_api_context(state)
     with TreqsApiClient(auth_state.api_url) as client:
         request = TrainingRequestService(client, auth_state, repo_context).get(request_id)
@@ -180,7 +209,14 @@ def requests_show_command(state: TreqsContext, request_id: str) -> None:
         click.echo(request.description)
 
 
-@requests_group.command("update")
+@requests_group.command(
+    "update",
+    epilog=examples(
+        'treqs tr update <request-id> --title "New title"',
+        "treqs tr update <request-id> --compute-target gpu-box",
+        "treqs tr update <request-id> --clear-workflow-path",
+    ),
+)
 @click.argument("request_id")
 @click.option("--title", help="Training request title.")
 @click.option("--description", help="Training request description.")
@@ -218,7 +254,11 @@ def requests_update_command(
     clear_compute_target: bool,
     clear_workflow_snapshot: bool,
 ) -> None:
-    """Update a training request in the repo-local project context."""
+    """Update a training request in the repo-local project context.
+
+    REQUEST_ID is the training request ID shown by `treqs tr list`.
+    Provide at least one update or --clear-* option.
+    """
     auth_state, repo_context = load_project_api_context(state)
     _validate_update_clear_options(
         description=description,
@@ -288,7 +328,14 @@ def requests_update_command(
         click.echo(f"Workflow snapshot: {request.workflowSnapshotId}")
 
 
-@requests_group.command("open")
+@requests_group.command(
+    "open",
+    epilog=examples(
+        "treqs tr open <request-id> --compute-target gpu-box",
+        "treqs tr open <request-id> --compute-target gpu-box \\",
+        "    --workflow-path .treqs/workflows/train.yaml",
+    ),
+)
 @click.argument("request_id")
 @click.option("--workflow-path", help="Workflow path, for example .treqs/workflows/train.yaml.")
 @click.option("--compute-target", required=True, help="Compute target ID or name.")
@@ -299,7 +346,11 @@ def requests_open_command(
     workflow_path: str | None,
     compute_target: str,
 ) -> None:
-    """Open a draft training request for review."""
+    """Open a draft training request for review.
+
+    REQUEST_ID is the training request ID shown by `treqs tr list`.
+    Opening requires a compute target; once open the request can be queued.
+    """
     auth_state, repo_context = load_project_api_context(state)
     with TreqsApiClient(auth_state.api_url) as client:
         compute_target_id = _resolve_compute_target(
@@ -328,11 +379,20 @@ def requests_open_command(
         click.echo(f"Compute target: {compute_target_id}")
 
 
-@requests_group.command("queue")
+@requests_group.command(
+    "queue",
+    epilog=examples(
+        "treqs tr queue <request-id>",
+    ),
+)
 @click.argument("request_id")
 @click.pass_obj
 def requests_queue_command(state: TreqsContext, request_id: str) -> None:
-    """Queue an open training request as a job."""
+    """Queue an open training request as a job.
+
+    REQUEST_ID is the training request ID shown by `treqs tr list`. Prints
+    the created job ID; follow it with `treqs jobs logs <job-id> --follow`.
+    """
     auth_state, repo_context = load_project_api_context(state)
     with TreqsApiClient(auth_state.api_url) as client:
         result = TrainingRequestService(client, auth_state, repo_context).queue(request_id)

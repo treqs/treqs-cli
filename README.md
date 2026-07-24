@@ -67,6 +67,7 @@ unless `TREQS_CLI_E2E=1` is set.
 ```bash
 treqs login
 treqs whoami
+treqs orgs list
 treqs projects list
 treqs project use <owner>/<project>
 treqs project status
@@ -82,5 +83,31 @@ treqs jobs list --status QUEUED
 treqs jobs show <job-id>
 ```
 
+Every command documents its options, arguments, and examples in `--help`; the
+full generated reference lives in [docs/CLI.md](docs/CLI.md) (regenerate with
+`uv run python -m treqs_cli.reference_docs`).
+
+### Owner scope
+
+Owner-scoped commands (`projects create`, `compute ...`) accept
+`--owner <org>` and default to the repo's bound project owner, then your
+personal owner. Repo-bound commands (`project`, `tr`, `jobs`) always use the
+binding in `.treqs/config.toml`. Discover organizations with `treqs orgs list`.
+
 The CLI stores global auth state under the platform config directory, or
 `TREQS_CONFIG_HOME` when set. Repo context is written to `.treqs/config.toml`.
+
+## Shell completion
+
+Click provides tab completion for commands and options:
+
+```bash
+# bash (~/.bashrc)
+eval "$(_TREQS_COMPLETE=bash_source treqs)"
+
+# zsh (~/.zshrc)
+eval "$(_TREQS_COMPLETE=zsh_source treqs)"
+
+# fish (~/.config/fish/completions/treqs.fish)
+_TREQS_COMPLETE=fish_source treqs | source
+```

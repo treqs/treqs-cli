@@ -149,9 +149,36 @@ class LazyGroup(click.Group):
         ]
 
 
-@click.command(cls=LazyGroup, lazy_commands=LAZY_COMMANDS)
+CLI_EPILOG = """\b
+Quick start:
+  treqs login
+  treqs projects list
+  treqs project use <owner>/<project>
+  treqs tr create --title "My run" --workflow-path .treqs/workflows/train.yaml
+  treqs tr open <request-id> --compute-target <target>
+  treqs tr queue <request-id>
+  treqs jobs logs <job-id> --follow
+
+\b
+Owner scope:
+  Owner-scoped commands accept --owner <org> and default to the repo's bound
+  project owner, then your personal owner. Repo-bound commands (project, tr,
+  jobs) always use the binding in .treqs/config.toml. Discover organizations
+  with `treqs orgs list`.
+
+Run `treqs COMMAND --help` for the options, arguments, and examples of each
+command.
+"""
+
+
+@click.command(cls=LazyGroup, lazy_commands=LAZY_COMMANDS, epilog=CLI_EPILOG)
 @click.version_option(version=__version__, prog_name="treqs")
-@click.option("--api-url", envvar="TREQS_API_URL", help="TReqs API base URL.")
+@click.option(
+    "--api-url",
+    envvar="TREQS_API_URL",
+    show_envvar=True,
+    help="TReqs API base URL.",
+)
 @click.option("--json", "json_output", is_flag=True, help="Emit machine-readable JSON.")
 @click.pass_context
 def cli(ctx: click.Context, api_url: str | None, json_output: bool) -> None:

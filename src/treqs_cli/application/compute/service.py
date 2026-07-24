@@ -4,7 +4,7 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Protocol
 
-from ...context import owner_path
+from ...context import OwnerScope, owner_path
 from ...models import AuthState, RepoContext
 from .models import (
     ComputeTarget,
@@ -45,16 +45,10 @@ class ComputeTargetApi(Protocol):
 
 
 @dataclass(frozen=True)
-class ComputeTargetScope:
-    owner_username: str
-    current_username: str | None
-
-
-@dataclass(frozen=True)
 class ComputeTargetService:
     client: ComputeTargetApi
     auth_state: AuthState
-    scope: ComputeTargetScope | RepoContext
+    scope: OwnerScope | RepoContext
 
     def list(self, *, include_agent: bool = False) -> list[ComputeTarget]:
         return self.client.list_compute_targets(
@@ -84,7 +78,7 @@ class ComputeTargetService:
         )
 
 
-def compute_targets_path(scope: ComputeTargetScope | RepoContext) -> str:
+def compute_targets_path(scope: OwnerScope | RepoContext) -> str:
     return owner_path(
         scope.owner_username,
         scope.current_username,
@@ -92,19 +86,19 @@ def compute_targets_path(scope: ComputeTargetScope | RepoContext) -> str:
     )
 
 
-def compute_target_path(scope: ComputeTargetScope | RepoContext, target_id: str) -> str:
+def compute_target_path(scope: OwnerScope | RepoContext, target_id: str) -> str:
     return f"{compute_targets_path(scope)}/{target_id}"
 
 
 def compute_target_secrets_path(
-    scope: ComputeTargetScope | RepoContext,
+    scope: OwnerScope | RepoContext,
     target_id: str,
 ) -> str:
     return f"{compute_target_path(scope, target_id)}/secrets"
 
 
 def registration_codes_path(
-    scope: ComputeTargetScope | RepoContext,
+    scope: OwnerScope | RepoContext,
     target_id: str,
 ) -> str:
     return f"{compute_target_path(scope, target_id)}/agent/registration-codes"

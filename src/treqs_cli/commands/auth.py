@@ -6,16 +6,29 @@ from ..api import TreqsApiClient
 from ..auth import open_browser, resolve_api_url
 from ..context import TreqsContext
 from ..errors import ApiError
+from ..help_text import examples
 from ..output import emit_json
 from .shared import auth_state_for_request, load_access_context
 
 
-@click.command("login")
+@click.command(
+    "login",
+    epilog=examples(
+        "treqs login",
+        "treqs login --no-browser",
+        "treqs --api-url http://localhost:3001 login",
+    ),
+)
 @click.option("--force", is_flag=True, help="Replace an existing login without prompting.")
 @click.option("--no-browser", is_flag=True, help="Do not try to open a browser automatically.")
 @click.pass_obj
 def login_command(state: TreqsContext, force: bool, no_browser: bool) -> None:
-    """Authenticate with TReqs using browser/device login."""
+    """Authenticate with TReqs using browser/device login.
+
+    Starts a device authorization flow: approve the printed URL and code in
+    your browser and the CLI stores the session in the platform config
+    directory (override with TREQS_CONFIG_HOME).
+    """
     api_url = resolve_api_url(state.api_url_override)
     existing = state.auth_store.load()
     if existing is not None and not force:
@@ -46,7 +59,12 @@ def login_command(state: TreqsContext, force: bool, no_browser: bool) -> None:
     click.echo(f"Saved auth state to {path}.")
 
 
-@click.command("logout")
+@click.command(
+    "logout",
+    epilog=examples(
+        "treqs logout",
+    ),
+)
 @click.pass_obj
 def logout_command(state: TreqsContext) -> None:
     """Clear local TReqs auth state and revoke the session when possible."""
@@ -65,10 +83,20 @@ def logout_command(state: TreqsContext) -> None:
         click.echo("Logged out." if removed else "No stored login found.")
 
 
-@click.command("whoami")
+@click.command(
+    "whoami",
+    epilog=examples(
+        "treqs whoami",
+        "treqs --json whoami",
+    ),
+)
 @click.pass_obj
 def whoami_command(state: TreqsContext) -> None:
-    """Show the authenticated TReqs user and owner access summary."""
+    """Show the authenticated TReqs user and owner access summary.
+
+    Lists every owner you can act as (yourself plus organizations) with your
+    role and project count per owner.
+    """
     auth_state, access_context = load_access_context(state)
     if state.json_output:
         emit_json({"auth": auth_state, "access_context": access_context})
@@ -80,4 +108,7 @@ def whoami_command(state: TreqsContext) -> None:
     click.echo(f"User ID: {user.id}")
     click.echo(f"API: {auth_state.api_url}")
     click.echo(f"Owners: {len(access_context.owners)}")
+    for owner in access_context.owners:
+        owner_projects = len(access_context.projects_by_owner.get(owner.id, []))
+        click.echo(f"  - {owner.username} ({owner.type}, {owner.role}, projects={owner_projects})")
     click.echo(f"Projects: {project_count}")

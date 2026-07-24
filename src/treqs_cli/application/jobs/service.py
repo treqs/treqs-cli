@@ -5,9 +5,8 @@ from dataclasses import dataclass
 from typing import Protocol
 from urllib.parse import quote
 
-from ...context import owner_path
+from ...context import OwnerScope, owner_path
 from ...models import AuthState, RepoContext
-from ..compute.service import ComputeTargetScope
 from .models import (
     JobStatus,
     LineageRepublishResult,
@@ -98,7 +97,7 @@ class JobService:
 class JobLogService:
     client: JobLogApi
     auth_state: AuthState
-    scope: ComputeTargetScope | RepoContext
+    scope: OwnerScope | RepoContext
 
     def poll(
         self,
@@ -129,7 +128,7 @@ def project_job_path(repo_context: RepoContext, job_id: str) -> str:
 
 
 def job_logs_poll_path(
-    scope: ComputeTargetScope | RepoContext,
+    scope: OwnerScope | RepoContext,
     target_id: str,
     job_id: str,
 ) -> str:

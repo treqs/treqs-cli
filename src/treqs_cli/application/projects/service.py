@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Protocol
 
-from ...context import owner_path
+from ...context import OwnerScope, owner_path
 from ...models import AuthState, RepoContext
 from .models import Project, ProjectCreateInput
 
@@ -18,16 +18,10 @@ class ProjectApi(Protocol):
 
 
 @dataclass(frozen=True)
-class ProjectScope:
-    owner_username: str
-    current_username: str | None
-
-
-@dataclass(frozen=True)
 class ProjectService:
     client: ProjectApi
     auth_state: AuthState
-    scope: ProjectScope | RepoContext
+    scope: OwnerScope | RepoContext
 
     def create(self, create_input: ProjectCreateInput) -> Project:
         return self.client.create_project(
@@ -37,7 +31,7 @@ class ProjectService:
         )
 
 
-def projects_path(scope: ProjectScope | RepoContext) -> str:
+def projects_path(scope: OwnerScope | RepoContext) -> str:
     return owner_path(
         scope.owner_username,
         scope.current_username,

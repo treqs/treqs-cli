@@ -1,12 +1,69 @@
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
+from typing import TypeVar
+
+import click
 
 from ..api import TreqsApiClient, ensure_fresh_auth
 from ..auth import resolve_api_url
-from ..context import TreqsContext
+from ..context import (
+    OwnerScope,
+    TreqsContext,
+    current_user_owner,
+    resolve_owner_selection,
+)
 from ..errors import ConfigError
 from ..models import AccessContext, AuthState, RepoContext
+
+OWNER_OPTION_HELP = (
+    "Owner username or organization. Defaults to the repo's bound project owner, "
+    "then your personal owner."
+)
+
+_Decorated = TypeVar("_Decorated", bound="click.Command | Callable[..., object]")
+
+
+def owner_option(command: _Decorated) -> _Decorated:
+    """Attach the CLI-wide --owner option.
+
+    Every owner-scoped command must use this decorator (enforced by the
+    owner-scope contract test) so scope resolution stays uniform across the CLI.
+    """
+    return click.option("--owner", help=OWNER_OPTION_HELP)(command)
+
+
+def resolve_owner_scope(
+    state: TreqsContext,
+    access_context: AccessContext,
+    owner: str | None,
+) -> OwnerScope:
+    """Resolve the owner scope for an owner-scoped command.
+
+    CLI-wide precedence: explicit --owner selection, then the repo's bound
+    project owner (when run inside a repo with `.treqs/config.toml`), then the
+    personal owner.
+    """
+    if owner is not None:
+        selected_owner = resolve_owner_selection(access_context, owner)
+        return OwnerScope(
+            owner_username=selected_owner.username,
+            current_username=access_context.user.username,
+        )
+
+    if state.is_git_repo:
+        repo_context = state.repo_context_store.load()
+        if repo_context is not None:
+            return OwnerScope(
+                owner_username=repo_context.owner_username,
+                current_username=repo_context.current_username,
+            )
+
+    selected_owner = current_user_owner(access_context)
+    return OwnerScope(
+        owner_username=selected_owner.username,
+        current_username=access_context.user.username,
+    )
 
 
 def load_access_context(state: TreqsContext) -> tuple[AuthState, AccessContext]:
