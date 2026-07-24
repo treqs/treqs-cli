@@ -89,7 +89,7 @@ def requests_list_command(
     "create",
     epilog=examples(
         'treqs tr create --title "Baseline run"',
-        'treqs tr create --title "Train v2" --workflow-path .github/workflows/train.yml',
+        'treqs tr create --title "Train v2" --workflow-path .treqs/workflows/train.yaml',
         'treqs tr create --title "GPU run" --compute-target gpu-box --status open',
     ),
 )
@@ -102,7 +102,7 @@ def requests_list_command(
     show_default=True,
     help="Initial training request status.",
 )
-@click.option("--workflow-path", help="Workflow path, for example .github/workflows/train.yml.")
+@click.option("--workflow-path", help="Workflow path, for example .treqs/workflows/train.yaml.")
 @click.option("--workflow-snapshot-id", help="Workflow snapshot ID for queue-time launch.")
 @click.option("--compute-target", help="Compute target ID or name for this request.")
 @click.option(
@@ -221,7 +221,7 @@ def requests_show_command(state: TreqsContext, request_id: str) -> None:
     type=click.Choice(TRAINING_REQUEST_STATUSES),
     help="Training request status.",
 )
-@click.option("--workflow-path", help="Workflow path, for example .github/workflows/train.yml.")
+@click.option("--workflow-path", help="Workflow path, for example .treqs/workflows/train.yaml.")
 @click.option("--workflow-snapshot-id", help="Workflow snapshot ID for queue-time launch.")
 @click.option("--compute-target", help="Compute target ID or name for this request.")
 @click.option(
@@ -329,11 +329,11 @@ def requests_update_command(
     epilog=examples(
         "treqs tr open <request-id> --compute-target gpu-box",
         "treqs tr open <request-id> --compute-target gpu-box \\",
-        "    --workflow-path .github/workflows/train.yml",
+        "    --workflow-path .treqs/workflows/train.yaml",
     ),
 )
 @click.argument("request_id")
-@click.option("--workflow-path", help="Workflow path, for example .github/workflows/train.yml.")
+@click.option("--workflow-path", help="Workflow path, for example .treqs/workflows/train.yaml.")
 @click.option("--compute-target", required=True, help="Compute target ID or name.")
 @click.pass_obj
 def requests_open_command(

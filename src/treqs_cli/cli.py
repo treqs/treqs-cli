@@ -154,7 +154,7 @@ Quick start:
   treqs login
   treqs projects list
   treqs project use <owner>/<project>
-  treqs tr create --title "My run" --workflow-path .github/workflows/train.yml
+  treqs tr create --title "My run" --workflow-path .treqs/workflows/train.yaml
   treqs tr open <request-id> --compute-target <target>
   treqs tr queue <request-id>
   treqs jobs logs <job-id> --follow
