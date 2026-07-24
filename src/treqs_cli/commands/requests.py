@@ -82,7 +82,7 @@ def requests_list_command(
     show_default=True,
     help="Initial training request status.",
 )
-@click.option("--workflow-path", help="Workflow path, for example .github/workflows/train.yml.")
+@click.option("--workflow-path", help="Workflow path, for example .treqs/workflows/train.yaml.")
 @click.option("--workflow-snapshot-id", help="Workflow snapshot ID for queue-time launch.")
 @click.option("--compute-target", help="Compute target ID or name for this request.")
 @click.option(
@@ -185,7 +185,7 @@ def requests_show_command(state: TreqsContext, request_id: str) -> None:
     type=click.Choice(TRAINING_REQUEST_STATUSES),
     help="Training request status.",
 )
-@click.option("--workflow-path", help="Workflow path, for example .github/workflows/train.yml.")
+@click.option("--workflow-path", help="Workflow path, for example .treqs/workflows/train.yaml.")
 @click.option("--workflow-snapshot-id", help="Workflow snapshot ID for queue-time launch.")
 @click.option("--compute-target", help="Compute target ID or name for this request.")
 @click.option(
@@ -286,7 +286,7 @@ def requests_update_command(
 
 @requests_group.command("open")
 @click.argument("request_id")
-@click.option("--workflow-path", help="Workflow path, for example .github/workflows/train.yml.")
+@click.option("--workflow-path", help="Workflow path, for example .treqs/workflows/train.yaml.")
 @click.option("--compute-target", required=True, help="Compute target ID or name.")
 @click.pass_obj
 def requests_open_command(
