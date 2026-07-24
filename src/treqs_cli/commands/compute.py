@@ -10,15 +10,13 @@ from ..application.compute.models import (
     parse_secret_assignment,
 )
 from ..application.compute.service import (
-    ComputeTargetScope,
     ComputeTargetService,
     resolve_compute_target_id,
 )
-from ..context import TreqsContext, current_user_owner, resolve_owner_selection
+from ..context import OwnerScope, TreqsContext
 from ..errors import ConfigError, TreqsCliError
-from ..models import AccessContext
 from ..output import emit_json, render_table
-from .shared import load_access_context
+from .shared import load_access_context, owner_option, resolve_owner_scope
 
 
 @click.group("compute")
@@ -33,7 +31,7 @@ def compute_targets_group() -> None:
 
 @compute_targets_group.command("list")
 @click.option("--include-agent", is_flag=True, help="Include registered agent details.")
-@click.option("--owner", help="Owner username or organization to inspect.")
+@owner_option
 @click.option(
     "--all",
     "list_all",
@@ -59,7 +57,7 @@ def compute_targets_list_command(
         if list_all:
             targets = []
             for access_owner in access_context.owners:
-                scope = ComputeTargetScope(
+                scope = OwnerScope(
                     owner_username=access_owner.username,
                     current_username=access_context.user.username,
                 )
@@ -70,7 +68,7 @@ def compute_targets_list_command(
                 )
             scope_label = "all your owners"
         else:
-            scope = _resolve_compute_scope(state, access_context, owner)
+            scope = resolve_owner_scope(state, access_context, owner)
             targets = ComputeTargetService(client, auth_state, scope).list(
                 include_agent=include_agent
             )
@@ -137,7 +135,7 @@ def compute_targets_list_command(
     help="Idle minutes before auto-shutdown (on-demand).",
 )
 @click.option("--description", help="Compute target description.")
-@click.option("--owner", help="Owner username or organization to create the target under.")
+@owner_option
 @click.pass_obj
 def compute_targets_create_command(
     state: TreqsContext,
@@ -165,7 +163,7 @@ def compute_targets_create_command(
         effective_type = "dedicated"
 
     auth_state, access_context = load_access_context(state)
-    scope = _resolve_compute_scope(state, access_context, owner)
+    scope = resolve_owner_scope(state, access_context, owner)
     with TreqsApiClient(auth_state.api_url) as client:
         target = ComputeTargetService(client, auth_state, scope).create(
             ComputeTargetCreateInput(
@@ -200,7 +198,7 @@ def compute_secrets_group() -> None:
 
 @compute_secrets_group.command("set")
 @click.option("--target", "target", required=True, help="Compute target ID or name.")
-@click.option("--owner", help="Owner username or organization that owns the target.")
+@owner_option
 @click.argument("assignments", nargs=-1, required=True)
 @click.pass_obj
 def compute_secrets_set_command(
@@ -211,7 +209,7 @@ def compute_secrets_set_command(
 ) -> None:
     """Set one or more KEY=VALUE secrets on a compute target."""
     auth_state, access_context = load_access_context(state)
-    scope = _resolve_compute_scope(state, access_context, owner)
+    scope = resolve_owner_scope(state, access_context, owner)
 
     try:
         secrets = [parse_secret_assignment(assignment) for assignment in assignments]
@@ -259,7 +257,7 @@ def compute_targets_registration_code_group() -> None:
 
 @compute_targets_registration_code_group.command("create")
 @click.option("--target", "target", required=True, help="Compute target ID or name.")
-@click.option("--owner", help="Owner username or organization that owns the target.")
+@owner_option
 @click.pass_obj
 def compute_targets_registration_code_create_command(
     state: TreqsContext,
@@ -268,7 +266,7 @@ def compute_targets_registration_code_create_command(
 ) -> None:
     """Create an agent registration code for a compute target."""
     auth_state, access_context = load_access_context(state)
-    scope = _resolve_compute_scope(state, access_context, owner)
+    scope = resolve_owner_scope(state, access_context, owner)
     with TreqsApiClient(auth_state.api_url) as client:
         service = ComputeTargetService(client, auth_state, scope)
         target_id = _resolve_target_id(service, target)
@@ -286,30 +284,3 @@ def _resolve_target_id(service: ComputeTargetService, selection: str) -> str:
         return resolve_compute_target_id(service.list(), selection)
     except ValueError as exc:
         raise ConfigError(str(exc)) from exc
-
-
-def _resolve_compute_scope(
-    state: TreqsContext,
-    access_context: AccessContext,
-    owner: str | None,
-) -> ComputeTargetScope:
-    if owner is not None:
-        selected_owner = resolve_owner_selection(access_context, owner)
-        return ComputeTargetScope(
-            owner_username=selected_owner.username,
-            current_username=access_context.user.username,
-        )
-
-    if state.is_git_repo:
-        repo_context = state.repo_context_store.load()
-        if repo_context is not None:
-            return ComputeTargetScope(
-                owner_username=repo_context.owner_username,
-                current_username=repo_context.current_username,
-            )
-
-    selected_owner = current_user_owner(access_context)
-    return ComputeTargetScope(
-        owner_username=selected_owner.username,
-        current_username=access_context.user.username,
-    )

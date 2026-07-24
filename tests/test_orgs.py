@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import Any
+from typing import Any, ClassVar
 
 from click.testing import CliRunner
 
@@ -12,7 +12,7 @@ from treqs_cli.models import AccessContext, AuthState
 
 
 class _FakeClient:
-    payload: dict[str, object] = {}
+    payload: ClassVar[dict[str, object]] = {}
 
     def __init__(self, api_url: str) -> None:
         self.api_url = api_url

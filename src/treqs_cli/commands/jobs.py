@@ -6,13 +6,12 @@ import click
 
 from ..api import TreqsApiClient
 from ..application.compute.service import (
-    ComputeTargetScope,
     ComputeTargetService,
     resolve_compute_target_id,
 )
 from ..application.jobs.models import JOB_STATUSES, JobStatus, job_rows
 from ..application.jobs.service import JobLogService, JobService
-from ..context import TreqsContext
+from ..context import OwnerScope, TreqsContext
 from ..errors import ConfigError
 from ..models import AuthState, RepoContext
 from ..output import emit_json, render_table
@@ -138,7 +137,7 @@ def jobs_logs_command(
 ) -> None:
     """Print logs for a job, optionally following until complete."""
     auth_state, repo_context = load_project_api_context(state)
-    scope = ComputeTargetScope(
+    scope = OwnerScope(
         owner_username=repo_context.owner_username,
         current_username=repo_context.current_username,
     )
@@ -166,7 +165,7 @@ def _resolve_log_target_id(
     client: TreqsApiClient,
     auth_state: AuthState,
     repo_context: RepoContext,
-    scope: ComputeTargetScope,
+    scope: OwnerScope,
     job_id: str,
     target: str | None,
 ) -> str:

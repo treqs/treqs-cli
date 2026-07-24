@@ -14,19 +14,22 @@ from ..application.projects.models import (
     slugify_name,
     validate_slug,
 )
-from ..application.projects.service import ProjectScope, ProjectService
+from ..application.projects.service import ProjectService
 from ..context import (
     TreqsContext,
     build_repo_context,
-    current_user_owner,
     project_scope,
-    resolve_owner_selection,
     resolve_project_selection,
 )
 from ..errors import ConfigError
 from ..models import AccessContext, AccessOwner, AccessProject
 from ..output import emit_json, render_table
-from .shared import load_access_context, require_git_repo
+from .shared import (
+    load_access_context,
+    owner_option,
+    require_git_repo,
+    resolve_owner_scope,
+)
 
 
 @click.group("projects")
@@ -82,7 +85,7 @@ def projects_list_command(state: TreqsContext) -> None:
     show_default=True,
     help="Default git branch for --code-config (workflow discovery + clone).",
 )
-@click.option("--owner", help="Owner username or organization to create the project under.")
+@owner_option
 @click.pass_obj
 def projects_create_command(
     state: TreqsContext,
@@ -97,7 +100,7 @@ def projects_create_command(
 ) -> None:
     """Create a project for a TReqs owner."""
     auth_state, access_context = load_access_context(state)
-    scope = _resolve_project_scope(access_context, owner)
+    scope = resolve_owner_scope(state, access_context, owner)
 
     try:
         resolved_slug = validate_slug(slug) if slug is not None else slugify_name(name)
@@ -189,20 +192,6 @@ def project_clear_command(state: TreqsContext) -> None:
         emit_json({"removed": removed})
     else:
         click.echo("Cleared TReqs project context." if removed else "No project context found.")
-
-
-def _resolve_project_scope(
-    access_context: AccessContext,
-    owner: str | None,
-) -> ProjectScope:
-    if owner is not None:
-        selected_owner = resolve_owner_selection(access_context, owner)
-    else:
-        selected_owner = current_user_owner(access_context)
-    return ProjectScope(
-        owner_username=selected_owner.username,
-        current_username=access_context.user.username,
-    )
 
 
 def _project_rows(access_context: AccessContext) -> list[dict[str, str]]:

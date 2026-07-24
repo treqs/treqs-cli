@@ -11,10 +11,10 @@ from treqs_cli.application.projects.models import (
     validate_slug,
 )
 from treqs_cli.application.projects.service import (
-    ProjectScope,
     ProjectService,
     projects_path,
 )
+from treqs_cli.context import OwnerScope
 from treqs_cli.models import AuthState, RepoContext
 
 
@@ -92,7 +92,7 @@ def test_slug_helpers() -> None:
 def test_project_service_builds_owner_scoped_path() -> None:
     client = _FakeProjectClient()
     auth_state = AuthState(api_url="https://api.treqs.ai", access_token="access-token")
-    scope = ProjectScope(owner_username="acme", current_username="trevor")
+    scope = OwnerScope(owner_username="acme", current_username="trevor")
 
     project = ProjectService(client, auth_state, scope).create(
         ProjectCreateInput(name="MNIST", slug="mnist")
@@ -112,7 +112,7 @@ def test_project_service_builds_owner_scoped_path() -> None:
 def test_project_service_uses_user_scope_for_self_owner() -> None:
     client = _FakeProjectClient()
     auth_state = AuthState(api_url="https://api.treqs.ai", access_token="access-token")
-    scope = ProjectScope(owner_username="trevor", current_username="trevor")
+    scope = OwnerScope(owner_username="trevor", current_username="trevor")
 
     ProjectService(client, auth_state, scope).create(ProjectCreateInput(name="MNIST", slug="mnist"))
 

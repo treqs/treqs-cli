@@ -12,13 +12,13 @@ from treqs_cli.application.compute.models import (
     validate_secret_name,
 )
 from treqs_cli.application.compute.service import (
-    ComputeTargetScope,
     ComputeTargetService,
     compute_target_secrets_path,
     compute_targets_path,
     registration_codes_path,
     resolve_compute_target_id,
 )
+from treqs_cli.context import OwnerScope
 from treqs_cli.models import AuthState, RepoContext
 
 
@@ -92,7 +92,7 @@ def test_compute_target_service_builds_owner_scoped_path() -> None:
 def test_compute_target_service_can_use_owner_scope_without_repo_context() -> None:
     client = _FakeComputeTargetClient()
     auth_state = AuthState(api_url="https://api.treqs.ai", access_token="access-token")
-    scope = ComputeTargetScope(owner_username="trevor", current_username="trevor")
+    scope = OwnerScope(owner_username="trevor", current_username="trevor")
 
     targets = ComputeTargetService(client, auth_state, scope).list()
 
@@ -190,7 +190,7 @@ def test_secret_name_validation_and_assignment_parsing() -> None:
 def test_compute_target_service_create_set_secret_and_registration_code_paths() -> None:
     client = _FakeComputeTargetClient()
     auth_state = AuthState(api_url="https://api.treqs.ai", access_token="access-token")
-    scope = ComputeTargetScope(owner_username="acme", current_username="trevor")
+    scope = OwnerScope(owner_username="acme", current_username="trevor")
     service = ComputeTargetService(client, auth_state, scope)
 
     created = service.create(ComputeTargetCreateInput(name="Dedicated GPU"))

@@ -45,6 +45,14 @@ class TreqsContext:
         )
 
 
+@dataclass(frozen=True)
+class OwnerScope:
+    """Resolved owner (personal user or organization) for owner-scoped API paths."""
+
+    owner_username: str
+    current_username: str | None
+
+
 def normalize_owner(value: str) -> str:
     return value.strip().removeprefix("@").lower()
 
