@@ -87,6 +87,10 @@ def jobs_show_command(state: TreqsContext, job_id: str) -> None:
         click.echo(f"Compute target: {job.computeTargetId}")
     if job.projectSlug:
         click.echo(f"Project: {job.projectSlug}")
+    if job.lineagePublishedSessionHash:
+        click.echo(f"Session: {job.lineagePublishedSessionHash}")
+    if job.lineagePublishedUrl:
+        click.echo(f"Lineage URL: {job.lineagePublishedUrl}")
     if job.createdAt:
         click.echo(f"Created: {job.createdAt}")
     if job.updatedAt:

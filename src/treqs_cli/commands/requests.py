@@ -167,6 +167,10 @@ def requests_show_command(state: TreqsContext, request_id: str) -> None:
         click.echo(f"Compute target: {compute_target_id}")
     if request.workflowSnapshotId:
         click.echo(f"Workflow snapshot: {request.workflowSnapshotId}")
+    if request.lineagePublishedSessionHash:
+        click.echo(f"Session: {request.lineagePublishedSessionHash}")
+    if request.lineagePublishedUrl:
+        click.echo(f"Lineage URL: {request.lineagePublishedUrl}")
     if request.createdAt:
         click.echo(f"Created: {request.createdAt}")
     if request.updatedAt:

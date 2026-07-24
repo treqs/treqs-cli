@@ -121,6 +121,8 @@ class TrainingRequest(BaseModel):
     workflowPath: str | None = None
     workflowSnapshotId: str | None = None
     computeSelection: dict[str, object] | None = None
+    lineagePublishedUrl: str | None = None
+    lineagePublishedSessionHash: str | None = None
     createdAt: str | None = None
     updatedAt: str | None = None
 

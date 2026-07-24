@@ -105,6 +105,28 @@ def test_response_dto_allows_additive_api_fields_and_table_rows() -> None:
     ]
 
 
+def test_response_dto_parses_lineage_publication_fields() -> None:
+    request = TrainingRequest.model_validate(
+        {
+            "id": "request-1",
+            "title": "Train model",
+            "status": "open",
+            "lineagePublishedUrl": "https://glaas.ai/dag/abc123",
+            "lineagePublishedSessionHash": "abc123",
+        }
+    )
+
+    assert request.lineagePublishedUrl == "https://glaas.ai/dag/abc123"
+    assert request.lineagePublishedSessionHash == "abc123"
+
+    unpublished = TrainingRequest.model_validate(
+        {"id": "request-2", "title": "Train model", "status": "open"}
+    )
+
+    assert unpublished.lineagePublishedUrl is None
+    assert unpublished.lineagePublishedSessionHash is None
+
+
 def test_training_request_service_builds_owner_scoped_paths() -> None:
     client = _FakeTrainingRequestClient()
     auth_state = AuthState(api_url="https://api.treqs.ai", access_token="access-token")

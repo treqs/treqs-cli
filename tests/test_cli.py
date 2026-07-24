@@ -299,6 +299,67 @@ def test_requests_commands_use_repo_project_context(
     ]
 
 
+def test_tr_show_prints_lineage_publication_when_present(
+    monkeypatch: Any,
+    tmp_path: Path,
+) -> None:
+    config_home = tmp_path / "config"
+    work_repo = tmp_path / "repo"
+    work_repo.mkdir()
+    (work_repo / ".git").mkdir()
+    AuthStore(config_home / "auth.json").save(
+        AuthState(api_url="https://api.treqs.ai", access_token="access-token")
+    )
+    RepoContextStore(work_repo / ".treqs" / "config.toml").save(
+        RepoContext(
+            api_url="https://api.treqs.ai",
+            owner_id="owner-1",
+            owner_type="user",
+            owner_username="trevor",
+            owner_display_name="Trevor",
+            project_id="project-1",
+            project_slug="mnist",
+            project_name="MNIST",
+            current_username="trevor",
+        )
+    )
+
+    class FakeClient:
+        def __init__(self, api_url: str) -> None:
+            self.api_url = api_url
+
+        def __enter__(self) -> FakeClient:
+            return self
+
+        def __exit__(self, *_exc: object) -> None:
+            return None
+
+        def get_training_request(
+            self,
+            auth_state: AuthState,
+            path: str,
+        ) -> TrainingRequest:
+            return TrainingRequest(
+                id="request-1",
+                title="Train model",
+                status="open",
+                projectSlug="mnist",
+                lineagePublishedUrl="https://glaas.ai/dag/abc123",
+                lineagePublishedSessionHash="abc123",
+            )
+
+    monkeypatch.setattr("treqs_cli.commands.requests.TreqsApiClient", FakeClient)
+    monkeypatch.chdir(work_repo)
+    runner = CliRunner()
+    env = {"TREQS_CONFIG_HOME": str(config_home)}
+
+    shown = runner.invoke(cli, ["tr", "show", "request-1"], env=env, catch_exceptions=False)
+
+    assert shown.exit_code == 0, shown.output
+    assert "Session: abc123" in shown.output
+    assert "Lineage URL: https://glaas.ai/dag/abc123" in shown.output
+
+
 def test_compute_and_jobs_commands_use_repo_project_context(
     monkeypatch: Any,
     tmp_path: Path,
@@ -421,6 +482,67 @@ def test_compute_and_jobs_commands_use_repo_project_context(
         ("jobs", "/api/v1/user/projects/mnist/jobs", ("https://api.treqs.ai", 20, "QUEUED")),
         ("job", "/api/v1/user/projects/mnist/jobs/job-1", "https://api.treqs.ai"),
     ]
+
+
+def test_jobs_show_prints_lineage_publication_when_present(
+    monkeypatch: Any,
+    tmp_path: Path,
+) -> None:
+    config_home = tmp_path / "config"
+    work_repo = tmp_path / "repo"
+    work_repo.mkdir()
+    (work_repo / ".git").mkdir()
+    AuthStore(config_home / "auth.json").save(
+        AuthState(api_url="https://api.treqs.ai", access_token="access-token")
+    )
+    RepoContextStore(work_repo / ".treqs" / "config.toml").save(
+        RepoContext(
+            api_url="https://api.treqs.ai",
+            owner_id="owner-1",
+            owner_type="user",
+            owner_username="trevor",
+            owner_display_name="Trevor",
+            project_id="project-1",
+            project_slug="mnist",
+            project_name="MNIST",
+            current_username="trevor",
+        )
+    )
+
+    class FakeClient:
+        def __init__(self, api_url: str) -> None:
+            self.api_url = api_url
+
+        def __enter__(self) -> FakeClient:
+            return self
+
+        def __exit__(self, *_exc: object) -> None:
+            return None
+
+        def get_project_job(
+            self,
+            auth_state: AuthState,
+            path: str,
+        ) -> TrainingJob:
+            return TrainingJob(
+                id="job-1",
+                trainingRequestId="request-1",
+                projectSlug="mnist",
+                status="COMPLETED",
+                lineagePublishedUrl="https://glaas.ai/dag/abc123",
+                lineagePublishedSessionHash="abc123",
+            )
+
+    monkeypatch.setattr("treqs_cli.commands.jobs.TreqsApiClient", FakeClient)
+    monkeypatch.chdir(work_repo)
+    runner = CliRunner()
+    env = {"TREQS_CONFIG_HOME": str(config_home)}
+
+    shown = runner.invoke(cli, ["jobs", "show", "job-1"], env=env, catch_exceptions=False)
+
+    assert shown.exit_code == 0, shown.output
+    assert "Session: abc123" in shown.output
+    assert "Lineage URL: https://glaas.ai/dag/abc123" in shown.output
 
 
 def test_compute_targets_list_can_run_without_repo_context(
