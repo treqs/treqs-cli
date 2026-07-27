@@ -64,28 +64,94 @@ unless `TREQS_CLI_E2E=1` is set.
 
 ## Commands
 
-```bash
-treqs login
-treqs whoami
-treqs orgs list
-treqs projects list
-treqs project use <owner>/<project>
-treqs project status
-treqs tr list
-treqs tr create --title "Train MNIST" --workflow-snapshot-id <snapshot-id>
-treqs tr show <request-id>
-treqs tr update <request-id> --title "Train Fashion MNIST"
-treqs tr update <request-id> --clear-workflow-path --clear-compute-target
-treqs tr open <request-id> --workflow-path ".treqs/workflows/train.yaml" --compute-target <target>
-treqs tr queue <request-id>
-treqs compute targets list --owner <owner>
-treqs jobs list --status QUEUED
-treqs jobs show <job-id>
-```
-
 Every command documents its options, arguments, and examples in `--help`; the
 full generated reference lives in [docs/CLI.md](docs/CLI.md) (regenerate with
 `uv run python -m treqs_cli.reference_docs`).
+
+### `treqs login` / `treqs logout`
+
+Authenticate via browser/device login; `logout` clears local auth state and
+revokes the session when possible.
+
+```bash
+treqs login
+treqs logout
+```
+
+### `treqs whoami`
+
+Show the authenticated user and every owner (yourself plus organizations) you
+can act as, with your role and project count per owner.
+
+```bash
+treqs whoami
+```
+
+### `treqs orgs list`
+
+List organizations you belong to. Every name shown is a valid `--owner` value
+for owner-scoped commands and for `<owner>/<project>` selections.
+
+```bash
+treqs orgs list
+```
+
+### `treqs projects`
+
+List projects available to you, or create a new one for an owner.
+
+```bash
+treqs projects list
+treqs projects create "MNIST Digits" --visibility public
+treqs projects create "Team Model" --owner acme
+```
+
+### `treqs project`
+
+Manage the repo-local project binding, written to `.treqs/config.toml`. This
+binding drives `tr` and `jobs` commands and sets the default owner scope for
+owner-scoped commands.
+
+```bash
+treqs project use <owner>/<project>
+treqs project status
+treqs project clear
+```
+
+### `treqs tr`
+
+Manage training requests for the repo-bound project: create a draft, open it
+against a compute target, then queue it as a job.
+
+```bash
+treqs tr create --title "Train MNIST" --workflow-path .treqs/workflows/train.yaml
+treqs tr list --status open
+treqs tr open <request-id> --compute-target <target>
+treqs tr queue <request-id>
+```
+
+### `treqs compute`
+
+Inspect and create compute targets, set their secrets, and issue agent
+registration codes.
+
+```bash
+treqs compute targets list --owner <owner>
+treqs compute targets create --name gpu-box
+treqs compute secrets set --target gpu-box WANDB_API_KEY=abc123
+treqs compute targets registration-code create --target gpu-box
+```
+
+### `treqs jobs`
+
+Inspect jobs, which are created by `treqs tr queue`.
+
+```bash
+treqs jobs list --status QUEUED
+treqs jobs show <job-id>
+treqs jobs logs <job-id> --follow
+treqs jobs republish-lineage <job-id>
+```
 
 ### Owner scope
 
