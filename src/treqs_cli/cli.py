@@ -166,6 +166,12 @@ Owner scope:
   jobs) always use the binding in .treqs/config.toml. Discover organizations
   with `treqs orgs list`.
 
+\b
+Authentication:
+  `treqs login` uses a browser/device flow; `treqs login --token` stores a
+  dashboard-issued API token instead. When TREQS_API_TOKEN is set it takes
+  precedence over any stored login for API requests and is never persisted.
+
 Run `treqs COMMAND --help` for the options, arguments, and examples of each
 command.
 """

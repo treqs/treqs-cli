@@ -70,11 +70,12 @@ full generated reference lives in [docs/CLI.md](docs/CLI.md) (regenerate with
 
 ### `treqs login` / `treqs logout`
 
-Authenticate via browser/device login; `logout` clears local auth state and
-revokes the session when possible.
+Authenticate via browser/device login or a dashboard-generated API token;
+`logout` clears local auth state and revokes the session when possible.
 
 ```bash
 treqs login
+treqs login --token treqs_pat_...
 treqs logout
 ```
 
@@ -152,6 +153,19 @@ treqs jobs show <job-id>
 treqs jobs logs <job-id> --follow
 treqs jobs republish-lineage <job-id>
 ```
+
+### API tokens
+
+Besides the browser/device flow, the CLI accepts personal API tokens generated
+in the TReqs dashboard (`treqs_pat_...`):
+
+- `treqs login --token treqs_pat_...` validates the token against the API and
+  stores it like a normal login. Use `--token -` to read the token from stdin
+  (e.g. `echo $TOKEN | treqs login --token -`) so it never hits shell history.
+- `TREQS_API_TOKEN=treqs_pat_...` authenticates API requests directly from the
+  environment without touching stored auth state. When set, it takes
+  precedence over any stored login; `treqs logout` still clears stored state
+  but the environment token stays active until unset.
 
 ### Owner scope
 
