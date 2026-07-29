@@ -545,6 +545,145 @@ def test_jobs_show_prints_lineage_publication_when_present(
     assert "Lineage URL: https://glaas.ai/dag/abc123" in shown.output
 
 
+def test_jobs_cancel_resolves_target_from_job_and_cancels(
+    monkeypatch: Any,
+    tmp_path: Path,
+) -> None:
+    config_home = tmp_path / "config"
+    work_repo = tmp_path / "repo"
+    work_repo.mkdir()
+    (work_repo / ".git").mkdir()
+    AuthStore(config_home / "auth.json").save(
+        AuthState(api_url="https://api.treqs.ai", access_token="access-token")
+    )
+    RepoContextStore(work_repo / ".treqs" / "config.toml").save(
+        RepoContext(
+            api_url="https://api.treqs.ai",
+            owner_id="owner-1",
+            owner_type="user",
+            owner_username="trevor",
+            owner_display_name="Trevor",
+            project_id="project-1",
+            project_slug="mnist",
+            project_name="MNIST",
+            current_username="trevor",
+        )
+    )
+
+    calls: list[tuple[str, str]] = []
+
+    class FakeClient:
+        def __init__(self, api_url: str) -> None:
+            self.api_url = api_url
+
+        def __enter__(self) -> FakeClient:
+            return self
+
+        def __exit__(self, *_exc: object) -> None:
+            return None
+
+        def get_project_job(self, _auth_state: AuthState, path: str) -> TrainingJob:
+            calls.append(("get", path))
+            return TrainingJob(
+                id="job-1",
+                projectSlug="mnist",
+                computeTargetId="ct-1",
+                status="QUEUED",
+            )
+
+        def cancel_job(self, _auth_state: AuthState, path: str) -> TrainingJob:
+            calls.append(("cancel", path))
+            return TrainingJob(id="job-1", computeTargetId="ct-1", status="CANCELLED")
+
+    monkeypatch.setattr("treqs_cli.commands.jobs.TreqsApiClient", FakeClient)
+    monkeypatch.chdir(work_repo)
+    runner = CliRunner()
+    env = {"TREQS_CONFIG_HOME": str(config_home)}
+
+    result = runner.invoke(cli, ["jobs", "cancel", "job-1"], env=env, catch_exceptions=False)
+
+    assert result.exit_code == 0, result.output
+    assert "Cancelled job job-1." in result.output
+    assert "Status: CANCELLED" in result.output
+    assert calls == [
+        ("get", "/api/v1/user/projects/mnist/jobs/job-1"),
+        ("cancel", "/api/v1/user/compute-targets/ct-1/jobs/job-1/cancel"),
+    ]
+
+
+def test_jobs_cancel_with_explicit_target_skips_job_lookup(
+    monkeypatch: Any,
+    tmp_path: Path,
+) -> None:
+    config_home = tmp_path / "config"
+    work_repo = tmp_path / "repo"
+    work_repo.mkdir()
+    (work_repo / ".git").mkdir()
+    AuthStore(config_home / "auth.json").save(
+        AuthState(api_url="https://api.treqs.ai", access_token="access-token")
+    )
+    RepoContextStore(work_repo / ".treqs" / "config.toml").save(
+        RepoContext(
+            api_url="https://api.treqs.ai",
+            owner_id="owner-1",
+            owner_type="user",
+            owner_username="trevor",
+            owner_display_name="Trevor",
+            project_id="project-1",
+            project_slug="mnist",
+            project_name="MNIST",
+            current_username="trevor",
+        )
+    )
+
+    calls: list[tuple[str, str]] = []
+
+    class FakeClient:
+        def __init__(self, api_url: str) -> None:
+            self.api_url = api_url
+
+        def __enter__(self) -> FakeClient:
+            return self
+
+        def __exit__(self, *_exc: object) -> None:
+            return None
+
+        def list_compute_targets(
+            self,
+            _auth_state: AuthState,
+            path: str,
+            *,
+            include_agent: bool = False,
+        ) -> list[ComputeTarget]:
+            calls.append(("targets", path))
+            return [ComputeTarget(id="ct-2", name="gpu-box", type="dedicated", kind="dedicated")]
+
+        def get_project_job(self, _auth_state: AuthState, path: str) -> TrainingJob:
+            raise AssertionError("job lookup should be skipped when --target is given")
+
+        def cancel_job(self, _auth_state: AuthState, path: str) -> TrainingJob:
+            calls.append(("cancel", path))
+            return TrainingJob(id="job-1", computeTargetId="ct-2", status="CANCELLED")
+
+    monkeypatch.setattr("treqs_cli.commands.jobs.TreqsApiClient", FakeClient)
+    monkeypatch.chdir(work_repo)
+    runner = CliRunner()
+    env = {"TREQS_CONFIG_HOME": str(config_home)}
+
+    result = runner.invoke(
+        cli,
+        ["jobs", "cancel", "job-1", "--target", "gpu-box"],
+        env=env,
+        catch_exceptions=False,
+    )
+
+    assert result.exit_code == 0, result.output
+    assert calls == [
+        ("targets", "/api/v1/user/compute-targets"),
+        ("cancel", "/api/v1/user/compute-targets/ct-2/jobs/job-1/cancel"),
+    ]
+
+
 def test_compute_targets_list_can_run_without_repo_context(
     monkeypatch: Any,
     tmp_path: Path,

@@ -617,10 +617,31 @@ Options:
   --help  Show this message and exit.
 
 Commands:
+  cancel             Cancel a queued or running job.
   list               List jobs for the repo-local project context.
   logs               Print logs for a job, optionally following until...
   republish-lineage  Re-publish a job's stored lineage package to GLaaS.
   show               Show one job from the repo-local project context.
+```
+
+## `treqs jobs cancel`
+
+```
+Usage: treqs jobs cancel [OPTIONS] JOB_ID
+
+  Cancel a queued or running job.
+
+  JOB_ID is the job ID shown by `treqs jobs list` or printed by `treqs tr
+  queue`. Only QUEUED/ASSIGNED/ACQUIRED/IN_PROGRESS jobs can be cancelled;
+  cancelling an already-cancelled job is a no-op.
+
+Options:
+  --target TEXT  Compute target ID or name. Defaults to the job's target.
+  --help         Show this message and exit.
+
+  Examples:
+    treqs jobs cancel <job-id>
+    treqs jobs cancel <job-id> --target gpu-box
 ```
 
 ## `treqs jobs list`

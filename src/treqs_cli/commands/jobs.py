@@ -150,6 +150,40 @@ def jobs_republish_lineage_command(state: TreqsContext, job_id: str) -> None:
 
 
 @jobs_group.command(
+    "cancel",
+    epilog=examples(
+        "treqs jobs cancel <job-id>",
+        "treqs jobs cancel <job-id> --target gpu-box",
+    ),
+)
+@click.argument("job_id")
+@click.option("--target", "target", help="Compute target ID or name. Defaults to the job's target.")
+@click.pass_obj
+def jobs_cancel_command(state: TreqsContext, job_id: str, target: str | None) -> None:
+    """Cancel a queued or running job.
+
+    JOB_ID is the job ID shown by `treqs jobs list` or printed by
+    `treqs tr queue`. Only QUEUED/ASSIGNED/ACQUIRED/IN_PROGRESS jobs can be
+    cancelled; cancelling an already-cancelled job is a no-op.
+    """
+    auth_state, repo_context = load_project_api_context(state)
+    scope = OwnerScope(
+        owner_username=repo_context.owner_username,
+        current_username=repo_context.current_username,
+    )
+    with TreqsApiClient(auth_state.api_url) as client:
+        target_id = _resolve_job_target_id(client, auth_state, repo_context, scope, job_id, target)
+        job = JobService(client, auth_state, repo_context).cancel(target_id, job_id)
+
+    if state.json_output:
+        emit_json(job)
+        return
+
+    click.echo(f"Cancelled job {job.id}.")
+    click.echo(f"Status: {job.status}")
+
+
+@jobs_group.command(
     "logs",
     epilog=examples(
         "treqs jobs logs <job-id>",
@@ -186,7 +220,7 @@ def jobs_logs_command(
         current_username=repo_context.current_username,
     )
     with TreqsApiClient(auth_state.api_url) as client:
-        target_id = _resolve_log_target_id(client, auth_state, repo_context, scope, job_id, target)
+        target_id = _resolve_job_target_id(client, auth_state, repo_context, scope, job_id, target)
         log_service = JobLogService(client, auth_state, scope)
         cursor = 0
         while True:
@@ -205,7 +239,7 @@ def jobs_logs_command(
                 break
 
 
-def _resolve_log_target_id(
+def _resolve_job_target_id(
     client: TreqsApiClient,
     auth_state: AuthState,
     repo_context: RepoContext,

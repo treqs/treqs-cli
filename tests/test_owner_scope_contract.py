@@ -44,6 +44,7 @@ REPO_BOUND = {
     "tr queue",
     "jobs list",
     "jobs show",
+    "jobs cancel",
     "jobs logs",
     "jobs republish-lineage",
 }

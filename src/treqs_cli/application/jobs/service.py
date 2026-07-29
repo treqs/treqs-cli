@@ -38,6 +38,12 @@ class JobsApi(Protocol):
         path: str,
     ) -> LineageRepublishResult: ...
 
+    def cancel_job(
+        self,
+        auth_state: AuthState,
+        path: str,
+    ) -> TrainingJob: ...
+
 
 class JobLogApi(Protocol):
     def poll_job_logs(
@@ -92,6 +98,12 @@ class JobService:
             f"{project_job_path(self.repo_context, job_id)}/lineage/republish",
         )
 
+    def cancel(self, target_id: str, job_id: str) -> TrainingJob:
+        return self.client.cancel_job(
+            self.auth_state,
+            job_cancel_path(self.repo_context, target_id, job_id),
+        )
+
 
 @dataclass(frozen=True)
 class JobLogService:
@@ -136,4 +148,16 @@ def job_logs_poll_path(
         scope.owner_username,
         scope.current_username,
         f"/compute-targets/{quote(target_id, safe='')}/jobs/{quote(job_id, safe='')}/logs/poll",
+    )
+
+
+def job_cancel_path(
+    scope: OwnerScope | RepoContext,
+    target_id: str,
+    job_id: str,
+) -> str:
+    return owner_path(
+        scope.owner_username,
+        scope.current_username,
+        f"/compute-targets/{quote(target_id, safe='')}/jobs/{quote(job_id, safe='')}/cancel",
     )
