@@ -14,6 +14,7 @@ from treqs_cli.application.jobs.models import (
 from treqs_cli.application.jobs.service import (
     JobLogService,
     JobService,
+    job_cancel_path,
     job_logs_poll_path,
     project_job_path,
     project_jobs_path,
@@ -118,6 +119,33 @@ def test_job_service_republish_lineage_builds_path_and_parses_result() -> None:
     assert result.published_session_hash == "a" * 64
     assert client.calls == [
         ("republish", "/api/v1/user/orgs/acme/projects/mnist/jobs/job-1/lineage/republish"),
+    ]
+
+
+def test_job_service_cancel_builds_path_and_parses_result() -> None:
+    client = _FakeJobsClient()
+    auth_state = AuthState(api_url="https://api.treqs.ai", access_token="access-token")
+    repo_context = RepoContext(
+        api_url="https://api.treqs.ai",
+        owner_id="org-1",
+        owner_type="organization",
+        owner_username="acme",
+        owner_display_name="Acme",
+        project_id="project-1",
+        project_slug="mnist",
+        project_name="MNIST",
+        current_username="trevor",
+    )
+
+    job = JobService(client, auth_state, repo_context).cancel("ct-1", "job-1")
+
+    assert job.id == "job-1"
+    assert job.status == "CANCELLED"
+    assert job_cancel_path(repo_context, "ct-1", "job-1") == (
+        "/api/v1/user/orgs/acme/compute-targets/ct-1/jobs/job-1/cancel"
+    )
+    assert client.calls == [
+        ("cancel", "/api/v1/user/orgs/acme/compute-targets/ct-1/jobs/job-1/cancel"),
     ]
 
 
@@ -247,3 +275,12 @@ class _FakeJobsClient:
             projectSlug="mnist",
             status="QUEUED",
         )
+
+    def cancel_job(
+        self,
+        _auth_state: AuthState,
+        path: str,
+    ) -> TrainingJob:
+        self.calls.append(("cancel", path))
+        job_id = path.split("/jobs/", 1)[-1].removesuffix("/cancel")
+        return TrainingJob(id=job_id, status="CANCELLED")

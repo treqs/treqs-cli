@@ -306,6 +306,14 @@ class TreqsApiClient:
         payload = self.request_json("POST", path, auth_state=auth_state)
         return LineageRepublishResult.model_validate(_unwrap_data(payload))
 
+    def cancel_job(
+        self,
+        auth_state: AuthState,
+        path: str,
+    ) -> TrainingJob:
+        payload = self.request_json("POST", path, auth_state=auth_state)
+        return TrainingJob.model_validate(_unwrap_data(payload))
+
     def poll_job_logs(
         self,
         auth_state: AuthState,
