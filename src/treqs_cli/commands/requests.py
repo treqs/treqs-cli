@@ -17,6 +17,7 @@ from ..application.requests.models import (
     training_request_rows,
 )
 from ..application.requests.service import TrainingRequestService
+from ..config import current_branch
 from ..context import TreqsContext
 from ..errors import ConfigError
 from ..help_text import examples
@@ -107,7 +108,7 @@ def requests_list_command(
 @click.option("--compute-target", help="Compute target ID or name for this request.")
 @click.option(
     "--source-branch",
-    help="Git branch the workflow and repo are cloned from (defaults to the repo default branch).",
+    help="Git branch the workflow and repo are cloned from (defaults to the current git branch).",
 )
 @click.option(
     "--lineage-mode",
@@ -136,6 +137,7 @@ def requests_create_command(
     if workflow_path and lineage_mode is None:
         _warn_if_workflow_self_publishes(state, workflow_path)
     auth_state, repo_context = load_project_api_context(state)
+    resolved_source_branch = source_branch or current_branch(state.repo_root)
     with TreqsApiClient(auth_state.api_url) as client:
         compute_target_id = _resolve_compute_target(
             client, auth_state, repo_context, compute_target
@@ -148,7 +150,7 @@ def requests_create_command(
                 workflow_path=workflow_path,
                 compute_target_id=compute_target_id,
                 workflow_snapshot_id=workflow_snapshot_id,
-                source_branch=source_branch,
+                source_branch=resolved_source_branch,
                 lineage_mode=lineage_mode,
             )
         )
@@ -230,7 +232,7 @@ def requests_show_command(state: TreqsContext, request_id: str) -> None:
 @click.option("--compute-target", help="Compute target ID or name for this request.")
 @click.option(
     "--source-branch",
-    help="Git branch the workflow and repo are cloned from (defaults to the repo default branch).",
+    help="Git branch the workflow and repo are cloned from (unchanged if omitted).",
 )
 @click.option("--clear-description", is_flag=True, help="Clear the request description.")
 @click.option("--clear-workflow-path", is_flag=True, help="Clear the workflow path.")

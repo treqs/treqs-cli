@@ -299,6 +299,109 @@ def test_requests_commands_use_repo_project_context(
     ]
 
 
+def test_tr_create_defaults_source_branch_from_git(
+    monkeypatch: Any,
+    tmp_path: Path,
+) -> None:
+    config_home = tmp_path / "config"
+    work_repo = tmp_path / "repo"
+    work_repo.mkdir()
+    subprocess.run(["git", "init", "-q", "-b", "feature/xyz"], cwd=work_repo, check=True)
+    subprocess.run(["git", "config", "user.email", "a@b.com"], cwd=work_repo, check=True)
+    subprocess.run(["git", "config", "user.name", "a"], cwd=work_repo, check=True)
+    subprocess.run(
+        ["git", "commit", "--allow-empty", "-q", "-m", "init"], cwd=work_repo, check=True
+    )
+    AuthStore(config_home / "auth.json").save(
+        AuthState(api_url="https://api.treqs.ai", access_token="access-token")
+    )
+    RepoContextStore(work_repo / ".treqs" / "config.toml").save(
+        RepoContext(
+            api_url="https://api.treqs.ai",
+            owner_id="owner-1",
+            owner_type="user",
+            owner_username="trevor",
+            owner_display_name="Trevor",
+            project_id="project-1",
+            project_slug="mnist",
+            project_name="MNIST",
+            current_username="trevor",
+        )
+    )
+
+    calls: list[tuple[object, ...]] = []
+
+    class FakeClient:
+        def __init__(self, api_url: str) -> None:
+            self.api_url = api_url
+
+        def __enter__(self) -> FakeClient:
+            return self
+
+        def __exit__(self, *_exc: object) -> None:
+            return None
+
+        def create_training_request(
+            self,
+            auth_state: AuthState,
+            path: str,
+            json_payload: dict[str, object],
+        ) -> TrainingRequest:
+            calls.append(("create", path, json_payload))
+            return TrainingRequest.model_validate(
+                {**_training_request_payload().model_dump(mode="json"), **json_payload}
+            )
+
+    monkeypatch.setattr("treqs_cli.commands.requests.TreqsApiClient", FakeClient)
+    monkeypatch.chdir(work_repo)
+    runner = CliRunner()
+    env = {"TREQS_CONFIG_HOME": str(config_home)}
+
+    defaulted = runner.invoke(
+        cli,
+        ["--json", "tr", "create", "--title", "Train model"],
+        env=env,
+        catch_exceptions=False,
+    )
+    overridden = runner.invoke(
+        cli,
+        [
+            "--json",
+            "tr",
+            "create",
+            "--title",
+            "Train model",
+            "--source-branch",
+            "explicit-branch",
+        ],
+        env=env,
+        catch_exceptions=False,
+    )
+
+    assert defaulted.exit_code == 0, defaulted.output
+    assert overridden.exit_code == 0, overridden.output
+    assert calls == [
+        (
+            "create",
+            "/api/v1/user/projects/mnist/training-requests",
+            {
+                "title": "Train model",
+                "status": "draft",
+                "codeConfig": {"sourceBranch": "feature/xyz"},
+            },
+        ),
+        (
+            "create",
+            "/api/v1/user/projects/mnist/training-requests",
+            {
+                "title": "Train model",
+                "status": "draft",
+                "codeConfig": {"sourceBranch": "explicit-branch"},
+            },
+        ),
+    ]
+
+
 def test_tr_show_prints_lineage_publication_when_present(
     monkeypatch: Any,
     tmp_path: Path,

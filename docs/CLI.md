@@ -305,7 +305,7 @@ Options:
   --workflow-snapshot-id TEXT     Workflow snapshot ID for queue-time launch.
   --compute-target TEXT           Compute target ID or name for this request.
   --source-branch TEXT            Git branch the workflow and repo are cloned
-                                  from (defaults to the repo default branch).
+                                  from (defaults to the current git branch).
   --lineage-mode [private|public|public_anonymous]
                                   Publish lineage natively for this fresh
                                   workflow: compiles a lineage snapshot so the
@@ -415,7 +415,7 @@ Options:
   --workflow-snapshot-id TEXT     Workflow snapshot ID for queue-time launch.
   --compute-target TEXT           Compute target ID or name for this request.
   --source-branch TEXT            Git branch the workflow and repo are cloned
-                                  from (defaults to the repo default branch).
+                                  from (unchanged if omitted).
   --clear-description             Clear the request description.
   --clear-workflow-path           Clear the workflow path.
   --clear-compute-target          Clear the compute target selection.
