@@ -323,6 +323,10 @@ Options:
                                   workflow: compiles a lineage snapshot so the
                                   run publishes to GLaaS (private = linked to
                                   the project). Requires --workflow-path.
+                                  public/public_anonymous need confirmation
+                                  (interactively, or pass --yes).
+  -y, --yes                       Skip the public-lineage confirmation prompt
+                                  (for non-interactive use).
   --help                          Show this message and exit.
 
   Examples:
@@ -428,10 +432,20 @@ Options:
   --compute-target TEXT           Compute target ID or name for this request.
   --source-branch TEXT            Git branch the workflow and repo are cloned
                                   from (unchanged if omitted).
+  --lineage-mode [private|public|public_anonymous]
+                                  Publish lineage natively (compiles a lineage
+                                  snapshot if the request doesn't already have
+                                  one; needs a workflow path, either already
+                                  stored or passed here).
+                                  public/public_anonymous need confirmation
+                                  (interactively, or pass --yes).
   --clear-description             Clear the request description.
   --clear-workflow-path           Clear the workflow path.
   --clear-compute-target          Clear the compute target selection.
   --clear-workflow-snapshot       Clear the workflow snapshot selection.
+  --clear-lineage-mode            Clear the lineage publication mode.
+  -y, --yes                       Skip the public-lineage confirmation prompt
+                                  (for non-interactive use).
   --help                          Show this message and exit.
 
   Examples:

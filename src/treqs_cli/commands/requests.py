@@ -116,8 +116,15 @@ def requests_list_command(
     help=(
         "Publish lineage natively for this fresh workflow: compiles a lineage "
         "snapshot so the run publishes to GLaaS (private = linked to the project). "
-        "Requires --workflow-path."
+        "Requires --workflow-path. public/public_anonymous need confirmation "
+        "(interactively, or pass --yes)."
     ),
+)
+@click.option(
+    "--yes",
+    "-y",
+    is_flag=True,
+    help="Skip the public-lineage confirmation prompt (for non-interactive use).",
 )
 @click.pass_obj
 def requests_create_command(
@@ -130,12 +137,14 @@ def requests_create_command(
     compute_target: str | None,
     source_branch: str | None,
     lineage_mode: str | None,
+    yes: bool,
 ) -> None:
     """Create a training request in the repo-local project context."""
     if lineage_mode is not None and not workflow_path:
         raise ConfigError("--lineage-mode requires --workflow-path.")
     if workflow_path and lineage_mode is None:
         _warn_if_workflow_self_publishes(state, workflow_path)
+    _confirm_public_lineage_mode(state, lineage_mode, yes)
     auth_state, repo_context = load_project_api_context(state)
     resolved_source_branch = source_branch or current_branch(state.repo_root)
     with TreqsApiClient(auth_state.api_url) as client:
@@ -234,11 +243,27 @@ def requests_show_command(state: TreqsContext, request_id: str) -> None:
     "--source-branch",
     help="Git branch the workflow and repo are cloned from (unchanged if omitted).",
 )
+@click.option(
+    "--lineage-mode",
+    type=click.Choice(["private", "public", "public_anonymous"]),
+    help=(
+        "Publish lineage natively (compiles a lineage snapshot if the request doesn't "
+        "already have one; needs a workflow path, either already stored or passed here). "
+        "public/public_anonymous need confirmation (interactively, or pass --yes)."
+    ),
+)
 @click.option("--clear-description", is_flag=True, help="Clear the request description.")
 @click.option("--clear-workflow-path", is_flag=True, help="Clear the workflow path.")
 @click.option("--clear-compute-target", is_flag=True, help="Clear the compute target selection.")
 @click.option(
     "--clear-workflow-snapshot", is_flag=True, help="Clear the workflow snapshot selection."
+)
+@click.option("--clear-lineage-mode", is_flag=True, help="Clear the lineage publication mode.")
+@click.option(
+    "--yes",
+    "-y",
+    is_flag=True,
+    help="Skip the public-lineage confirmation prompt (for non-interactive use).",
 )
 @click.pass_obj
 def requests_update_command(
@@ -251,10 +276,13 @@ def requests_update_command(
     workflow_snapshot_id: str | None,
     compute_target: str | None,
     source_branch: str | None,
+    lineage_mode: str | None,
     clear_description: bool,
     clear_workflow_path: bool,
     clear_compute_target: bool,
     clear_workflow_snapshot: bool,
+    clear_lineage_mode: bool,
+    yes: bool,
 ) -> None:
     """Update a training request in the repo-local project context.
 
@@ -267,10 +295,12 @@ def requests_update_command(
         workflow_path=workflow_path,
         compute_target=compute_target,
         workflow_snapshot_id=workflow_snapshot_id,
+        lineage_mode=lineage_mode,
         clear_description=clear_description,
         clear_workflow_path=clear_workflow_path,
         clear_compute_target=clear_compute_target,
         clear_workflow_snapshot=clear_workflow_snapshot,
+        clear_lineage_mode=clear_lineage_mode,
     )
     if all(
         value is None
@@ -282,6 +312,7 @@ def requests_update_command(
             workflow_snapshot_id,
             compute_target,
             source_branch,
+            lineage_mode,
         )
     ) and not any(
         (
@@ -289,9 +320,11 @@ def requests_update_command(
             clear_workflow_path,
             clear_compute_target,
             clear_workflow_snapshot,
+            clear_lineage_mode,
         )
     ):
         raise ConfigError("Nothing to update. Provide at least one update option.")
+    _confirm_public_lineage_mode(state, lineage_mode, yes)
 
     with TreqsApiClient(auth_state.api_url) as client:
         compute_target_id = _resolve_compute_target(
@@ -307,10 +340,12 @@ def requests_update_command(
                 compute_target_id=compute_target_id,
                 workflow_snapshot_id=workflow_snapshot_id,
                 source_branch=source_branch,
+                lineage_mode=lineage_mode,
                 clear_description=clear_description,
                 clear_workflow_path=clear_workflow_path,
                 clear_compute_target=clear_compute_target,
                 clear_workflow_snapshot=clear_workflow_snapshot,
+                clear_lineage_mode=clear_lineage_mode,
             ),
         )
 
@@ -437,6 +472,30 @@ def _warn_if_workflow_self_publishes(state: TreqsContext, workflow_path: str) ->
         )
 
 
+def _confirm_public_lineage_mode(state: TreqsContext, lineage_mode: str | None, yes: bool) -> None:
+    """Guard against accidentally publishing lineage publicly.
+
+    public/public_anonymous need explicit confirmation: interactively via a
+    prompt, or --yes for scripted/unattended use. In a non-interactive
+    session without --yes, fails loudly instead of hanging on a prompt
+    nobody can answer.
+    """
+    if lineage_mode not in ("public", "public_anonymous"):
+        return
+    if yes:
+        return
+    if not state.is_interactive:
+        raise ConfigError(
+            f"--lineage-mode {lineage_mode} publishes this training request's lineage "
+            "publicly. Re-run with --yes to confirm in a non-interactive session."
+        )
+    if not click.confirm(
+        f"This will publish lineage PUBLICLY (--lineage-mode {lineage_mode}). Continue?",
+        default=False,
+    ):
+        raise click.Abort()
+
+
 def _resolve_compute_target(
     client: TreqsApiClient,
     auth_state: AuthState,
@@ -461,10 +520,12 @@ def _validate_update_clear_options(
     workflow_path: str | None,
     compute_target: str | None,
     workflow_snapshot_id: str | None,
+    lineage_mode: str | None,
     clear_description: bool,
     clear_workflow_path: bool,
     clear_compute_target: bool,
     clear_workflow_snapshot: bool,
+    clear_lineage_mode: bool,
 ) -> None:
     conflicts = [
         (clear_description and description is not None, "--description", "--clear-description"),
@@ -482,6 +543,11 @@ def _validate_update_clear_options(
             clear_workflow_snapshot and workflow_snapshot_id is not None,
             "--workflow-snapshot-id",
             "--clear-workflow-snapshot",
+        ),
+        (
+            clear_lineage_mode and lineage_mode is not None,
+            "--lineage-mode",
+            "--clear-lineage-mode",
         ),
     ]
     for has_conflict, set_option, clear_option in conflicts:

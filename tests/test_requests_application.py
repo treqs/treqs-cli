@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 from collections.abc import Sequence
+from pathlib import Path
 
+import click
 import pytest
 from pydantic import ValidationError
 
@@ -15,6 +17,9 @@ from treqs_cli.application.requests.models import (
     training_request_rows,
 )
 from treqs_cli.application.requests.service import TrainingRequestService
+from treqs_cli.config import AuthStore, RepoContextStore
+from treqs_cli.context import TreqsContext
+from treqs_cli.errors import ConfigError
 from treqs_cli.models import AuthState, RepoContext
 
 
@@ -71,6 +76,7 @@ def test_update_input_builds_clear_payload() -> None:
         clear_compute_target=True,
         clear_workflow_snapshot=True,
         clear_source_branch=True,
+        clear_lineage_mode=True,
     )
 
     assert update_input.to_api_payload() == {
@@ -79,7 +85,78 @@ def test_update_input_builds_clear_payload() -> None:
         "computeSelection": {"targetId": None},
         "workflowSnapshotId": None,
         "codeConfig": {"sourceBranch": None},
+        "lineagePublicationMode": None,
     }
+
+
+def test_update_input_includes_lineage_mode_when_set() -> None:
+    update_input = TrainingRequestUpdateInput(lineage_mode="public")
+
+    assert update_input.to_api_payload() == {"lineagePublicationMode": "public"}
+    # Omitted by default so existing (non-lineage) updates are unchanged.
+    assert "lineagePublicationMode" not in TrainingRequestUpdateInput().to_api_payload()
+
+
+def test_confirm_public_lineage_mode_noop_for_private_or_unset(tmp_path: Path) -> None:
+    from treqs_cli.commands.requests import _confirm_public_lineage_mode
+
+    state = _build_treqs_context(tmp_path, is_interactive=False)
+
+    # Neither call needs --yes or a prompt: private isn't a "public" mode, and
+    # None means --lineage-mode wasn't passed at all.
+    _confirm_public_lineage_mode(state, None, yes=False)
+    _confirm_public_lineage_mode(state, "private", yes=False)
+
+
+def test_confirm_public_lineage_mode_requires_yes_non_interactively() -> None:
+    from treqs_cli.commands.requests import _confirm_public_lineage_mode
+
+    state = _build_treqs_context(Path("."), is_interactive=False)
+
+    with pytest.raises(ConfigError, match="--yes"):
+        _confirm_public_lineage_mode(state, "public", yes=False)
+
+
+def test_confirm_public_lineage_mode_yes_bypasses_prompt_non_interactively() -> None:
+    from treqs_cli.commands.requests import _confirm_public_lineage_mode
+
+    state = _build_treqs_context(Path("."), is_interactive=False)
+
+    # Should not raise / should not attempt to read stdin.
+    _confirm_public_lineage_mode(state, "public_anonymous", yes=True)
+
+
+def test_confirm_public_lineage_mode_prompts_and_proceeds_on_accept(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from treqs_cli.commands.requests import _confirm_public_lineage_mode
+
+    state = _build_treqs_context(Path("."), is_interactive=True)
+    monkeypatch.setattr(click, "confirm", lambda *args, **kwargs: True)
+
+    _confirm_public_lineage_mode(state, "public", yes=False)
+
+
+def test_confirm_public_lineage_mode_aborts_when_declined(monkeypatch: pytest.MonkeyPatch) -> None:
+    from treqs_cli.commands.requests import _confirm_public_lineage_mode
+
+    state = _build_treqs_context(Path("."), is_interactive=True)
+    monkeypatch.setattr(click, "confirm", lambda *args, **kwargs: False)
+
+    with pytest.raises(click.Abort):
+        _confirm_public_lineage_mode(state, "public", yes=False)
+
+
+def _build_treqs_context(root: Path, *, is_interactive: bool) -> TreqsContext:
+    return TreqsContext(
+        api_url_override=None,
+        json_output=False,
+        auth_store=AuthStore(root / "auth.json"),
+        repo_context_store=RepoContextStore(root / ".treqs" / "config.toml"),
+        cwd=root,
+        repo_root=root,
+        is_interactive=is_interactive,
+    )
 
 
 def test_response_dto_allows_additive_api_fields_and_table_rows() -> None:
