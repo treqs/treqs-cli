@@ -53,6 +53,11 @@ Account:
     jobs) always use the binding in .treqs/config.toml. Discover organizations
     with `treqs orgs list`.
 
+  Authentication:
+    `treqs login` uses a browser/device flow; `treqs login --token` stores a
+    dashboard-issued API token instead. When TREQS_API_TOKEN is set it takes
+    precedence over any stored login for API requests and is never persisted.
+
   Run `treqs COMMAND --help` for the options, arguments, and examples of each
   command.
 ```
@@ -62,20 +67,27 @@ Account:
 ```
 Usage: treqs login [OPTIONS]
 
-  Authenticate with TReqs using browser/device login.
+  Authenticate with TReqs using browser/device login or an API token.
 
   Starts a device authorization flow: approve the printed URL and code in your
   browser and the CLI stores the session in the platform config directory
-  (override with TREQS_CONFIG_HOME).
+  (override with TREQS_CONFIG_HOME). With --token, the browser flow is skipped
+  and a dashboard-issued API token is validated and stored instead. To use a
+  token without storing it, set TREQS_API_TOKEN; it takes precedence over any
+  stored login for API requests.
 
 Options:
   --force       Replace an existing login without prompting.
   --no-browser  Do not try to open a browser automatically.
+  --token TEXT  Log in with a TReqs API token from the dashboard instead of the
+                browser flow. Pass '-' to read the token from stdin.
   --help        Show this message and exit.
 
   Examples:
     treqs login
     treqs login --no-browser
+    treqs login --token treqs_pat_XXXXXXXX
+    echo $TOKEN | treqs login --token -
     treqs --api-url http://localhost:3001 login
 ```
 

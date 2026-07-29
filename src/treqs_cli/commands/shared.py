@@ -1,12 +1,13 @@
 from __future__ import annotations
 
+import os
 from collections.abc import Callable, Mapping
 from typing import TypeVar
 
 import click
 
 from ..api import TreqsApiClient, ensure_fresh_auth
-from ..auth import resolve_api_url
+from ..auth import env_api_token, resolve_api_url, token_auth_state
 from ..context import (
     OwnerScope,
     TreqsContext,
@@ -67,13 +68,34 @@ def resolve_owner_scope(
 
 
 def load_access_context(state: TreqsContext) -> tuple[AuthState, AccessContext]:
-    auth_state = ensure_fresh_auth(
-        state.auth_store,
-        auth_state_for_request(state, state.auth_store.require()),
-    )
+    auth_state = resolve_request_auth(state)
     with TreqsApiClient(auth_state.api_url) as client:
         access_context = client.get_access_context(auth_state)
     return auth_state, access_context
+
+
+def resolve_request_auth(state: TreqsContext) -> AuthState:
+    """Resolve the auth state used for API requests.
+
+    A non-empty TREQS_API_TOKEN takes precedence over any stored login and is
+    never persisted; otherwise the stored session is loaded and refreshed.
+    """
+    env_token = env_api_token()
+    if env_token is not None:
+        return token_auth_state(_env_token_api_url(state), env_token)
+    return ensure_fresh_auth(
+        state.auth_store,
+        auth_state_for_request(state, state.auth_store.require()),
+    )
+
+
+def _env_token_api_url(state: TreqsContext) -> str:
+    """API URL chain for env-token auth: --api-url > TREQS_API_URL > stored login > default."""
+    if state.api_url_override is None and not os.environ.get("TREQS_API_URL", "").strip():
+        stored = state.auth_store.load()
+        if stored is not None:
+            return stored.api_url
+    return resolve_api_url(state.api_url_override)
 
 
 def auth_state_for_request(state: TreqsContext, auth_state: AuthState) -> AuthState:
@@ -85,8 +107,11 @@ def auth_state_for_request(state: TreqsContext, auth_state: AuthState) -> AuthSt
 def load_project_api_context(state: TreqsContext) -> tuple[AuthState, RepoContext]:
     require_git_repo(state)
     repo_context = state.repo_context_store.require()
-    auth_state = state.auth_store.require()
     api_url = resolve_api_url(state.api_url_override or repo_context.api_url)
+    env_token = env_api_token()
+    if env_token is not None:
+        return token_auth_state(api_url, env_token), repo_context
+    auth_state = state.auth_store.require()
     auth_state = ensure_fresh_auth(
         state.auth_store,
         auth_state.model_copy(update={"api_url": api_url}),
