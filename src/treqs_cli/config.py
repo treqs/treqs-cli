@@ -112,6 +112,25 @@ def discover_repo_root(start: Path | None = None) -> RepoDiscovery:
     return RepoDiscovery(root=current, is_git_repo=False)
 
 
+def current_branch(repo_root: Path) -> str | None:
+    """Current checked-out git branch, or None if detached/unresolvable.
+
+    Mirrors roar's `git rev-parse --abbrev-ref HEAD` VCS detection, except a
+    detached HEAD (which that command reports literally as `"HEAD"`) is
+    treated as unknown rather than recorded as a fake branch name.
+    """
+    try:
+        out = subprocess.check_output(
+            ["git", "rev-parse", "--abbrev-ref", "HEAD"],
+            cwd=repo_root,
+            stderr=subprocess.DEVNULL,
+            text=True,
+        ).strip()
+    except (subprocess.CalledProcessError, FileNotFoundError, OSError):
+        return None
+    return out if out and out != "HEAD" else None
+
+
 def find_repo_root(start: Path | None = None) -> Path:
     return discover_repo_root(start).root
 

@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from treqs_cli.config import RepoContextStore, discover_repo_root, find_repo_root
+from treqs_cli.config import RepoContextStore, current_branch, discover_repo_root, find_repo_root
 from treqs_cli.context import (
     TreqsContext,
     build_repo_context,
@@ -63,6 +63,33 @@ def test_find_repo_root_uses_git_metadata_from_nested_directory(tmp_path: Path) 
     discovery = discover_repo_root(nested)
     assert discovery.root == repo.resolve()
     assert discovery.is_git_repo is True
+
+
+def test_current_branch_reads_checked_out_branch(tmp_path: Path) -> None:
+    if shutil.which("git") is None:
+        pytest.skip("git is not installed")
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    subprocess.run(["git", "init", "-q", "-b", "feature/xyz"], cwd=repo, check=True)
+    subprocess.run(["git", "config", "user.email", "a@b.com"], cwd=repo, check=True)
+    subprocess.run(["git", "config", "user.name", "a"], cwd=repo, check=True)
+    subprocess.run(["git", "commit", "--allow-empty", "-q", "-m", "init"], cwd=repo, check=True)
+
+    assert current_branch(repo) == "feature/xyz"
+
+
+def test_current_branch_none_before_first_commit(tmp_path: Path) -> None:
+    if shutil.which("git") is None:
+        pytest.skip("git is not installed")
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    subprocess.run(["git", "init", "-q"], cwd=repo, check=True)
+
+    assert current_branch(repo) is None
+
+
+def test_current_branch_none_outside_git_repo(tmp_path: Path) -> None:
+    assert current_branch(tmp_path) is None
 
 
 def test_repo_discovery_marks_non_git_directory(tmp_path: Path) -> None:
