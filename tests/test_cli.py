@@ -16,6 +16,7 @@ from treqs_cli.cli import cli
 from treqs_cli.commands.shared import auth_state_for_request
 from treqs_cli.config import AuthStore, RepoContextStore
 from treqs_cli.context import TreqsContext
+from treqs_cli.errors import ConfigError
 from treqs_cli.models import AccessContext, AuthState, RepoContext
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -398,6 +399,153 @@ def test_tr_create_defaults_source_branch_from_git(
                 "status": "draft",
                 "codeConfig": {"sourceBranch": "explicit-branch"},
             },
+        ),
+    ]
+
+
+def test_tr_public_lineage_mode_requires_yes_non_interactively(
+    monkeypatch: Any,
+    tmp_path: Path,
+) -> None:
+    config_home = tmp_path / "config"
+    work_repo = tmp_path / "repo"
+    work_repo.mkdir()
+    (work_repo / ".git").mkdir()
+    AuthStore(config_home / "auth.json").save(
+        AuthState(api_url="https://api.treqs.ai", access_token="access-token")
+    )
+    RepoContextStore(work_repo / ".treqs" / "config.toml").save(
+        RepoContext(
+            api_url="https://api.treqs.ai",
+            owner_id="owner-1",
+            owner_type="user",
+            owner_username="trevor",
+            owner_display_name="Trevor",
+            project_id="project-1",
+            project_slug="mnist",
+            project_name="MNIST",
+            current_username="trevor",
+        )
+    )
+
+    calls: list[tuple[object, ...]] = []
+
+    class FakeClient:
+        def __init__(self, api_url: str) -> None:
+            self.api_url = api_url
+
+        def __enter__(self) -> FakeClient:
+            return self
+
+        def __exit__(self, *_exc: object) -> None:
+            return None
+
+        def create_training_request(
+            self,
+            auth_state: AuthState,
+            path: str,
+            json_payload: dict[str, object],
+        ) -> TrainingRequest:
+            calls.append(("create", path, json_payload))
+            return TrainingRequest.model_validate(
+                {**_training_request_payload().model_dump(mode="json"), **json_payload}
+            )
+
+        def update_training_request(
+            self,
+            auth_state: AuthState,
+            path: str,
+            json_payload: dict[str, object],
+        ) -> TrainingRequest:
+            calls.append(("update", path, json_payload))
+            return TrainingRequest.model_validate(
+                {**_training_request_payload().model_dump(mode="json"), **json_payload}
+            )
+
+    monkeypatch.setattr("treqs_cli.commands.requests.TreqsApiClient", FakeClient)
+    monkeypatch.chdir(work_repo)
+    runner = CliRunner()
+    env = {"TREQS_CONFIG_HOME": str(config_home)}
+
+    # No --yes, and CliRunner is never a tty: must fail rather than hang on a prompt.
+    blocked_create = runner.invoke(
+        cli,
+        [
+            "tr",
+            "create",
+            "--title",
+            "Train model",
+            "--workflow-path",
+            ".treqs/workflows/train.yaml",
+            "--lineage-mode",
+            "public",
+        ],
+        env=env,
+    )
+    blocked_update = runner.invoke(
+        cli,
+        ["tr", "update", "request-1", "--lineage-mode", "public_anonymous"],
+        env=env,
+    )
+
+    assert blocked_create.exit_code != 0
+    assert isinstance(blocked_create.exception, ConfigError)
+    assert "--yes" in str(blocked_create.exception)
+    assert blocked_update.exit_code != 0
+    assert isinstance(blocked_update.exception, ConfigError)
+    assert "--yes" in str(blocked_update.exception)
+    assert calls == []
+
+    # --yes bypasses the prompt and the request proceeds normally.
+    allowed_create = runner.invoke(
+        cli,
+        [
+            "--json",
+            "tr",
+            "create",
+            "--title",
+            "Train model",
+            "--workflow-path",
+            ".treqs/workflows/train.yaml",
+            "--lineage-mode",
+            "public",
+            "--yes",
+        ],
+        env=env,
+        catch_exceptions=False,
+    )
+    allowed_update = runner.invoke(
+        cli,
+        [
+            "--json",
+            "tr",
+            "update",
+            "request-1",
+            "--lineage-mode",
+            "public_anonymous",
+            "--yes",
+        ],
+        env=env,
+        catch_exceptions=False,
+    )
+
+    assert allowed_create.exit_code == 0, allowed_create.output
+    assert allowed_update.exit_code == 0, allowed_update.output
+    assert calls == [
+        (
+            "create",
+            "/api/v1/user/projects/mnist/training-requests",
+            {
+                "title": "Train model",
+                "status": "draft",
+                "workflowPath": ".treqs/workflows/train.yaml",
+                "lineagePublicationMode": "public",
+            },
+        ),
+        (
+            "update",
+            "/api/v1/user/projects/mnist/training-requests/request-1",
+            {"lineagePublicationMode": "public_anonymous"},
         ),
     ]
 

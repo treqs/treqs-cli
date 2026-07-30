@@ -54,11 +54,13 @@ class TrainingRequestUpdateInput(BaseModel):
     compute_target_id: str | None = None
     workflow_snapshot_id: str | None = None
     source_branch: str | None = None
+    lineage_mode: str | None = None
     clear_description: bool = False
     clear_workflow_path: bool = False
     clear_compute_target: bool = False
     clear_workflow_snapshot: bool = False
     clear_source_branch: bool = False
+    clear_lineage_mode: bool = False
 
     def to_api_payload(self) -> dict[str, object]:
         payload: dict[str, object] = {}
@@ -86,6 +88,10 @@ class TrainingRequestUpdateInput(BaseModel):
             payload["codeConfig"] = {"sourceBranch": None}
         elif self.source_branch is not None:
             payload["codeConfig"] = {"sourceBranch": self.source_branch}
+        if self.clear_lineage_mode:
+            payload["lineagePublicationMode"] = None
+        elif self.lineage_mode is not None:
+            payload["lineagePublicationMode"] = self.lineage_mode
         return payload
 
 
