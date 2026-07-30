@@ -26,6 +26,7 @@ from treqs_cli.commands.shared import OWNER_OPTION_HELP
 
 OWNER_SCOPED = {
     "projects create",
+    "project init",
     "compute targets list",
     "compute targets create",
     "compute targets registration-code create",
@@ -36,16 +37,21 @@ REPO_BOUND = {
     "project use",
     "project status",
     "project clear",
+    "doctor",
+    "run",
     "tr list",
     "tr create",
     "tr show",
     "tr update",
     "tr open",
     "tr queue",
+    "tr review approve",
+    "tr review reject",
     "jobs list",
     "jobs show",
     "jobs cancel",
     "jobs logs",
+    "jobs wait",
     "jobs republish-lineage",
 }
 
@@ -87,9 +93,7 @@ def test_every_command_is_classified_exactly_once() -> None:
 
     unclassified = discovered - classified
     stale = classified - discovered
-    overlaps = (OWNER_SCOPED & REPO_BOUND) | (OWNER_SCOPED & SCOPE_FREE) | (
-        REPO_BOUND & SCOPE_FREE
-    )
+    overlaps = (OWNER_SCOPED & REPO_BOUND) | (OWNER_SCOPED & SCOPE_FREE) | (REPO_BOUND & SCOPE_FREE)
 
     assert not unclassified, (
         f"New commands must be classified in the owner-scope contract test: {sorted(unclassified)}"

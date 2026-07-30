@@ -18,6 +18,7 @@ Options:
 Start Here:
   login   Authenticate with TReqs using browser/device login.
   whoami  Show the authenticated TReqs user and owner access summary.
+  doctor  Validate project, Git source, workflow, and compute readiness.
 
 Project Context:
   projects  List accessible TReqs projects.
@@ -27,7 +28,8 @@ Organizations:
   orgs  List TReqs organizations you belong to.
 
 Training Requests:
-  tr  Manage training requests for the current TReqs project.
+  tr   Manage training requests for the current TReqs project.
+  run  Create and launch a reproducible training request.
 
 Compute:
   compute  Inspect compute resources for the current TReqs owner.
@@ -107,6 +109,25 @@ Options:
   Examples:
     treqs whoami
     treqs --json whoami
+```
+
+## `treqs doctor`
+
+```
+Usage: treqs doctor [OPTIONS]
+
+  Validate laptop, project, source, and compute readiness.
+
+Options:
+  --target TEXT         Compute target ID or name to validate.  [required]
+  --workflow TEXT       Workflow path to validate at the selected commit.
+  --source-commit TEXT  Git revision that will be submitted.  [default: HEAD]
+  --help                Show this message and exit.
+
+  Examples:
+    treqs doctor --target gpu-box
+    treqs doctor --target gpu-box --workflow .treqs/workflows/train.yaml \
+        --source-commit <sha>
 ```
 
 ## `treqs projects`
@@ -189,6 +210,7 @@ Options:
 
 Commands:
   clear   Clear the repo-local TReqs project context.
+  init    Create or bind a project from the current Git repository.
   status  Show the repo-local TReqs project context.
   use     Set this repo's TReqs project context.
 ```
@@ -205,6 +227,42 @@ Options:
 
   Examples:
     treqs project clear
+```
+
+## `treqs project init`
+
+```
+Usage: treqs project init [OPTIONS]
+
+  Create or bind a project from the current Git repository.
+
+  Discovers the GitHub repository from the `origin` remote and creates a TReqs
+  project for it (or binds an existing one), then writes the repo-local project
+  context unless --no-use is given. Use --owner to place the project under an
+  organization from `treqs orgs list`.
+
+Options:
+  --from-git / --no-from-git      Discover the GitHub repository from the origin
+                                  remote.  [default: from-git]
+  --name TEXT                     Project name. Defaults to the repository name.
+  --slug TEXT                     Project slug. Defaults to a slugified project
+                                  name.
+  --visibility [public|private]   [default: private]
+  --description TEXT              Project description.
+  --code-access-mode [public|github_app]
+                                  [default: github_app]
+  --default-branch TEXT           Repository default branch. Discovered when
+                                  omitted.
+  --owner TEXT                    Owner username or organization. Defaults to
+                                  the repo's bound project owner, then your
+                                  personal owner.
+  --use / --no-use                Bind this checkout.  [default: use]
+  --help                          Show this message and exit.
+
+  Examples:
+    treqs project init
+    treqs project init --owner acme --visibility public
+    treqs project init --name "MNIST" --slug mnist
 ```
 
 ## `treqs project status`
@@ -295,6 +353,7 @@ Commands:
   list    List training requests for the repo-local project context.
   open    Open a draft training request for review.
   queue   Queue an open training request as a job.
+  review  Approve or reject an open training request.
   show    Show one training request from the repo-local project context.
   update  Update a training request in the repo-local project context.
 ```
@@ -318,6 +377,8 @@ Options:
   --compute-target TEXT           Compute target ID or name for this request.
   --source-branch TEXT            Git branch the workflow and repo are cloned
                                   from (defaults to the current git branch).
+  --source-commit TEXT            Full immutable Git commit for the workflow and
+                                  repository checkout.
   --lineage-mode [private|public|public_anonymous]
                                   Publish lineage natively for this fresh
                                   workflow: compiles a lineage snapshot so the
@@ -394,6 +455,57 @@ Options:
     treqs tr queue <request-id>
 ```
 
+## `treqs tr review`
+
+```
+Usage: treqs tr review [OPTIONS] COMMAND [ARGS]...
+
+  Approve or reject an open training request.
+
+Options:
+  --help  Show this message and exit.
+
+Commands:
+  approve  Approve an open training request.
+  reject   Reject an open training request.
+```
+
+## `treqs tr review approve`
+
+```
+Usage: treqs tr review approve [OPTIONS] REQUEST_ID
+
+  Approve an open training request.
+
+  REQUEST_ID is the training request ID shown by `treqs tr list`. An approved
+  request can be queued with `treqs tr queue`.
+
+Options:
+  --comment TEXT  Optional review comment.
+  --help          Show this message and exit.
+
+  Examples:
+    treqs tr review approve <request-id>
+    treqs tr review approve <request-id> --comment "LGTM"
+```
+
+## `treqs tr review reject`
+
+```
+Usage: treqs tr review reject [OPTIONS] REQUEST_ID
+
+  Reject an open training request.
+
+  REQUEST_ID is the training request ID shown by `treqs tr list`.
+
+Options:
+  --comment TEXT  Reason the request must be changed.  [required]
+  --help          Show this message and exit.
+
+  Examples:
+    treqs tr review reject <request-id> --comment "needs a smaller dataset"
+```
+
 ## `treqs tr show`
 
 ```
@@ -452,6 +564,35 @@ Options:
     treqs tr update <request-id> --title "New title"
     treqs tr update <request-id> --compute-target gpu-box
     treqs tr update <request-id> --clear-workflow-path
+```
+
+## `treqs run`
+
+```
+Usage: treqs run [OPTIONS]
+
+  Create, open, queue, and optionally follow a training request.
+
+Options:
+  --title TEXT                    Training request title.  [required]
+  --description TEXT              Training request description.
+  --workflow TEXT                 Committed .treqs workflow path.  [required]
+  --target TEXT                   Compute target ID or name.  [required]
+  --source-commit TEXT            Immutable Git revision to submit.  [default:
+                                  HEAD]
+  --lineage [private|public|public_anonymous]
+                                  [default: private]
+  --follow                        Follow logs and wait for completion.
+  --timeout FLOAT RANGE           Maximum seconds to wait when --follow is used.
+                                  [default: 7200.0; x>=1.0]
+  --yes                           Confirm the compute launch non-interactively.
+  --help                          Show this message and exit.
+
+  Examples:
+    treqs run --title "Train v2" --workflow .treqs/workflows/train.yaml \
+        --compute-target gpu-box
+    treqs run --title "Smoke" --workflow .treqs/workflows/train.yaml \
+        --compute-target gpu-box --lineage private --follow --yes
 ```
 
 ## `treqs compute`
@@ -636,6 +777,7 @@ Commands:
   logs               Print logs for a job, optionally following until...
   republish-lineage  Re-publish a job's stored lineage package to GLaaS.
   show               Show one job from the repo-local project context.
+  wait               Wait for a job to complete, fail, or be cancelled.
 ```
 
 ## `treqs jobs cancel`
@@ -739,6 +881,28 @@ Options:
   Examples:
     treqs jobs show <job-id>
     treqs --json jobs show <job-id>
+```
+
+## `treqs jobs wait`
+
+```
+Usage: treqs jobs wait [OPTIONS] JOB_ID
+
+  Wait for a job to complete, fail, or be cancelled.
+
+  JOB_ID is the job ID shown by `treqs jobs list` or printed by `treqs tr
+  queue`. Exits non-zero unless the job reaches COMPLETED.
+
+Options:
+  --timeout FLOAT RANGE        Maximum seconds to wait for a terminal job state.
+                               [default: 7200.0; x>=1.0]
+  --poll-interval FLOAT RANGE  Seconds between job status requests.  [default:
+                               5.0; x>=0.1]
+  --help                       Show this message and exit.
+
+  Examples:
+    treqs jobs wait <job-id>
+    treqs jobs wait <job-id> --timeout 3600
 ```
 
 ## `treqs logout`

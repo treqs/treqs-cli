@@ -55,9 +55,7 @@ def _env(config_home: Path) -> dict[str, str | None]:
     }
 
 
-def test_login_token_validates_and_saves_token_auth_state(
-    monkeypatch: Any, tmp_path: Path
-) -> None:
+def test_login_token_validates_and_saves_token_auth_state(monkeypatch: Any, tmp_path: Path) -> None:
     fake = _install_fake_client(monkeypatch)
     config_home = tmp_path / "config"
     monkeypatch.chdir(tmp_path)
@@ -82,9 +80,7 @@ def test_login_token_validates_and_saves_token_auth_state(
     assert payload["user"]["username"] == "trevor"
 
 
-def test_login_token_rejects_invalid_token_without_saving(
-    monkeypatch: Any, tmp_path: Path
-) -> None:
+def test_login_token_rejects_invalid_token_without_saving(monkeypatch: Any, tmp_path: Path) -> None:
     fake = _install_fake_client(monkeypatch)
     fake.access_context_error = ApiError("Unauthorized", status_code=401)
     config_home = tmp_path / "config"
@@ -192,9 +188,7 @@ def test_login_token_replaces_existing_session_with_confirm_or_force(
     assert payload["access_token"] == "treqs_pat_forced"
 
 
-def test_whoami_uses_env_api_token_without_stored_login(
-    monkeypatch: Any, tmp_path: Path
-) -> None:
+def test_whoami_uses_env_api_token_without_stored_login(monkeypatch: Any, tmp_path: Path) -> None:
     fake = _install_fake_client(monkeypatch)
     config_home = tmp_path / "config"
     monkeypatch.chdir(tmp_path)
@@ -212,9 +206,7 @@ def test_whoami_uses_env_api_token_without_stored_login(
     assert not (config_home / "auth.json").exists()
 
 
-def test_env_api_token_takes_precedence_over_stored_auth(
-    monkeypatch: Any, tmp_path: Path
-) -> None:
+def test_env_api_token_takes_precedence_over_stored_auth(monkeypatch: Any, tmp_path: Path) -> None:
     fake = _install_fake_client(monkeypatch)
     config_home = tmp_path / "config"
     AuthStore(config_home / "auth.json").save(

@@ -992,6 +992,7 @@ def test_repo_local_commands_fail_clearly_outside_git_repo(tmp_path: Path) -> No
     config_home = tmp_path / "config"
     commands = [
         ("project", "use", "trevor/mnist"),
+        ("project", "init"),
         ("project", "status"),
         ("project", "clear"),
         ("tr", "list"),
@@ -1000,8 +1001,20 @@ def test_repo_local_commands_fail_clearly_outside_git_repo(tmp_path: Path) -> No
         ("tr", "update", "request-1", "--title", "Train model"),
         ("tr", "open", "request-1", "--compute-target", "ct-1"),
         ("tr", "queue", "request-1"),
+        ("doctor", "--target", "ct-1"),
+        (
+            "run",
+            "--title",
+            "Train model",
+            "--workflow",
+            ".treqs/workflows/train.yml",
+            "--target",
+            "ct-1",
+            "--yes",
+        ),
         ("jobs", "list"),
         ("jobs", "show", "job-1"),
+        ("jobs", "wait", "job-1"),
     ]
 
     for args in commands:

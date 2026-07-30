@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from typing import Protocol
+from urllib.parse import quote
 
 from ...context import OwnerScope, owner_path
 from ...models import AuthState, RepoContext
@@ -16,6 +17,12 @@ class ProjectApi(Protocol):
         json_payload: dict[str, object],
     ) -> Project: ...
 
+    def get_project(
+        self,
+        auth_state: AuthState,
+        path: str,
+    ) -> Project: ...
+
 
 @dataclass(frozen=True)
 class ProjectService:
@@ -28,6 +35,12 @@ class ProjectService:
             self.auth_state,
             projects_path(self.scope),
             create_input.to_api_payload(),
+        )
+
+    def get(self, project_slug: str) -> Project:
+        return self.client.get_project(
+            self.auth_state,
+            f"{projects_path(self.scope)}/{quote(project_slug, safe='')}",
         )
 
 

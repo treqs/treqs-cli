@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import re
-from typing import cast
+from typing import Literal, cast
 
 import click
 
@@ -12,6 +12,7 @@ from ..application.requests.models import (
     TrainingRequestCreateInput,
     TrainingRequestListFilters,
     TrainingRequestOpenInput,
+    TrainingRequestReviewInput,
     TrainingRequestStatus,
     TrainingRequestUpdateInput,
     training_request_rows,
@@ -111,6 +112,10 @@ def requests_list_command(
     help="Git branch the workflow and repo are cloned from (defaults to the current git branch).",
 )
 @click.option(
+    "--source-commit",
+    help="Full immutable Git commit for the workflow and repository checkout.",
+)
+@click.option(
     "--lineage-mode",
     type=click.Choice(["private", "public", "public_anonymous"]),
     help=(
@@ -136,6 +141,7 @@ def requests_create_command(
     workflow_snapshot_id: str | None,
     compute_target: str | None,
     source_branch: str | None,
+    source_commit: str | None,
     lineage_mode: str | None,
     yes: bool,
 ) -> None:
@@ -160,6 +166,7 @@ def requests_create_command(
                 compute_target_id=compute_target_id,
                 workflow_snapshot_id=workflow_snapshot_id,
                 source_branch=resolved_source_branch,
+                source_commit=source_commit,
                 lineage_mode=lineage_mode,
             )
         )
@@ -443,6 +450,79 @@ def requests_queue_command(state: TreqsContext, request_id: str) -> None:
         click.echo(f"Job: {result.jobId}")
     if result.warningMessage:
         click.echo(f"Warning: {result.warningMessage}")
+
+
+@requests_group.group("review")
+def requests_review_group() -> None:
+    """Approve or reject an open training request."""
+
+
+@requests_review_group.command(
+    "approve",
+    epilog=examples(
+        "treqs tr review approve <request-id>",
+        'treqs tr review approve <request-id> --comment "LGTM"',
+    ),
+)
+@click.argument("request_id")
+@click.option("--comment", help="Optional review comment.")
+@click.pass_obj
+def requests_review_approve_command(
+    state: TreqsContext,
+    request_id: str,
+    comment: str | None,
+) -> None:
+    """Approve an open training request.
+
+    REQUEST_ID is the training request ID shown by `treqs tr list`. An
+    approved request can be queued with `treqs tr queue`.
+    """
+    _submit_review(state, request_id, "approved", comment)
+
+
+@requests_review_group.command(
+    "reject",
+    epilog=examples(
+        'treqs tr review reject <request-id> --comment "needs a smaller dataset"',
+    ),
+)
+@click.argument("request_id")
+@click.option("--comment", required=True, help="Reason the request must be changed.")
+@click.pass_obj
+def requests_review_reject_command(
+    state: TreqsContext,
+    request_id: str,
+    comment: str,
+) -> None:
+    """Reject an open training request.
+
+    REQUEST_ID is the training request ID shown by `treqs tr list`.
+    """
+    _submit_review(state, request_id, "rejected", comment)
+
+
+def _submit_review(
+    state: TreqsContext,
+    request_id: str,
+    status: str,
+    comment: str | None,
+) -> None:
+    auth_state, repo_context = load_project_api_context(state)
+    with TreqsApiClient(auth_state.api_url) as client:
+        result = TrainingRequestService(client, auth_state, repo_context).review(
+            request_id,
+            TrainingRequestReviewInput(
+                status=cast(Literal["approved", "rejected"], status),
+                content=comment,
+            ),
+        )
+
+    if state.json_output:
+        emit_json(result)
+        return
+
+    click.echo(f"Review {result.review.status}: {result.trainingRequest.id}.")
+    click.echo(f"Status: {result.trainingRequest.status}")
 
 
 def workflow_self_publishes(content: str) -> bool:

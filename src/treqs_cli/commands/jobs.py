@@ -10,7 +10,7 @@ from ..application.compute.service import (
     resolve_compute_target_id,
 )
 from ..application.jobs.models import JOB_STATUSES, JobStatus, job_rows
-from ..application.jobs.service import JobLogService, JobService
+from ..application.jobs.service import JobLogService, JobService, wait_for_terminal_job
 from ..context import OwnerScope, TreqsContext
 from ..errors import ConfigError
 from ..help_text import examples
@@ -109,14 +109,80 @@ def jobs_show_command(state: TreqsContext, job_id: str) -> None:
         click.echo(f"Compute target: {job.computeTargetId}")
     if job.projectSlug:
         click.echo(f"Project: {job.projectSlug}")
+    if job.lineagePublicationMode:
+        click.echo(f"Lineage mode: {job.lineagePublicationMode}")
+    if job.lineagePublicationStatus:
+        click.echo(f"Lineage publication: {job.lineagePublicationStatus}")
     if job.lineagePublishedSessionHash:
         click.echo(f"Session: {job.lineagePublishedSessionHash}")
     if job.lineagePublishedUrl:
         click.echo(f"Lineage URL: {job.lineagePublishedUrl}")
+    if job.lineagePublicationError:
+        click.echo(f"Lineage error: {job.lineagePublicationError}")
     if job.createdAt:
         click.echo(f"Created: {job.createdAt}")
     if job.updatedAt:
         click.echo(f"Updated: {job.updatedAt}")
+
+
+@jobs_group.command(
+    "wait",
+    epilog=examples(
+        "treqs jobs wait <job-id>",
+        "treqs jobs wait <job-id> --timeout 3600",
+    ),
+)
+@click.argument("job_id")
+@click.option(
+    "--timeout",
+    "timeout_seconds",
+    type=click.FloatRange(min=1.0),
+    default=7200.0,
+    show_default=True,
+    help="Maximum seconds to wait for a terminal job state.",
+)
+@click.option(
+    "--poll-interval",
+    "poll_interval_seconds",
+    type=click.FloatRange(min=0.1),
+    default=5.0,
+    show_default=True,
+    help="Seconds between job status requests.",
+)
+@click.pass_obj
+def jobs_wait_command(
+    state: TreqsContext,
+    job_id: str,
+    timeout_seconds: float,
+    poll_interval_seconds: float,
+) -> None:
+    """Wait for a job to complete, fail, or be cancelled.
+
+    JOB_ID is the job ID shown by `treqs jobs list` or printed by
+    `treqs tr queue`. Exits non-zero unless the job reaches COMPLETED.
+    """
+    auth_state, repo_context = load_project_api_context(state)
+    with TreqsApiClient(auth_state.api_url) as client:
+        service = JobService(client, auth_state, repo_context)
+        try:
+            job = wait_for_terminal_job(
+                lambda: service.get(job_id),
+                timeout_seconds=timeout_seconds,
+                poll_interval_seconds=poll_interval_seconds,
+            )
+        except TimeoutError as exc:
+            raise ConfigError(str(exc)) from exc
+
+    if state.json_output:
+        emit_json(job)
+    else:
+        click.echo(f"Job: {job.id}")
+        click.echo(f"Status: {job.status}")
+        if job.lineagePublishedUrl:
+            click.echo(f"Lineage URL: {job.lineagePublishedUrl}")
+
+    if job.status != "COMPLETED":
+        raise ConfigError(f"Job {job.id} finished with status {job.status}.")
 
 
 @jobs_group.command(
@@ -221,22 +287,37 @@ def jobs_logs_command(
     )
     with TreqsApiClient(auth_state.api_url) as client:
         target_id = _resolve_job_target_id(client, auth_state, repo_context, scope, job_id, target)
-        log_service = JobLogService(client, auth_state, scope)
-        cursor = 0
-        while True:
-            result = log_service.poll(
-                target_id,
-                job_id,
-                from_sequence=cursor,
-                timeout_ms=poll_timeout_ms,
-            )
-            for chunk in result.chunks:
-                click.echo(chunk.content, nl=False)
-            cursor = result.nextSequence
-            if not result.hasMore:
-                break
-            if not follow:
-                break
+        follow_job_logs(
+            JobLogService(client, auth_state, scope),
+            target_id,
+            job_id,
+            follow=follow,
+            poll_timeout_ms=poll_timeout_ms,
+        )
+
+
+def follow_job_logs(
+    log_service: JobLogService,
+    target_id: str,
+    job_id: str,
+    *,
+    follow: bool,
+    poll_timeout_ms: int,
+) -> None:
+    """Render paged job logs and optionally follow them to completion."""
+    cursor = 0
+    while True:
+        result = log_service.poll(
+            target_id,
+            job_id,
+            from_sequence=cursor,
+            timeout_ms=poll_timeout_ms,
+        )
+        for chunk in result.chunks:
+            click.echo(chunk.content, nl=False)
+        cursor = result.nextSequence
+        if not result.hasMore or not follow:
+            break
 
 
 def _resolve_job_target_id(

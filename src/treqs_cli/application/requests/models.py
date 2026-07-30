@@ -25,6 +25,7 @@ class TrainingRequestCreateInput(BaseModel):
     compute_target_id: str | None = None
     workflow_snapshot_id: str | None = None
     source_branch: str | None = None
+    source_commit: str | None = None
     lineage_mode: str | None = None
 
     def to_api_payload(self) -> dict[str, object]:
@@ -37,8 +38,14 @@ class TrainingRequestCreateInput(BaseModel):
             payload["computeSelection"] = {"targetId": self.compute_target_id}
         if self.workflow_snapshot_id is not None:
             payload["workflowSnapshotId"] = self.workflow_snapshot_id
+        code_config: dict[str, object] = {}
         if self.source_branch is not None:
-            payload["codeConfig"] = {"sourceBranch": self.source_branch}
+            code_config["sourceBranch"] = self.source_branch
+        if self.source_commit is not None:
+            code_config["sourceCommit"] = self.source_commit
+            code_config["pinMode"] = "commit"
+        if code_config:
+            payload["codeConfig"] = code_config
         if self.lineage_mode is not None:
             payload["lineagePublicationMode"] = self.lineage_mode
         return payload
@@ -127,6 +134,7 @@ class TrainingRequest(BaseModel):
     workflowPath: str | None = None
     workflowSnapshotId: str | None = None
     computeSelection: dict[str, object] | None = None
+    codeConfig: dict[str, object] | None = None
     lineagePublishedUrl: str | None = None
     lineagePublishedSessionHash: str | None = None
     createdAt: str | None = None
@@ -139,6 +147,34 @@ class TrainingRequestQueueResult(BaseModel):
     trainingRequest: TrainingRequest
     jobId: str | None = None
     warningMessage: str | None = None
+
+
+class TrainingRequestReviewInput(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    status: Literal["approved", "rejected"]
+    content: str | None = None
+
+    def to_api_payload(self) -> dict[str, object]:
+        payload: dict[str, object] = {"status": self.status}
+        if self.content is not None:
+            payload["content"] = self.content
+        return payload
+
+
+class TrainingRequestReview(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
+    id: str | None = None
+    status: str
+    content: str | None = None
+
+
+class TrainingRequestReviewResult(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
+    review: TrainingRequestReview
+    trainingRequest: TrainingRequest
 
 
 def training_request_rows(requests: Sequence[TrainingRequest]) -> list[dict[str, str]]:

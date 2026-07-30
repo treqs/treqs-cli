@@ -14,7 +14,11 @@ from .application.jobs.models import (
     TrainingJob,
 )
 from .application.projects.models import Project
-from .application.requests.models import TrainingRequest, TrainingRequestQueueResult
+from .application.requests.models import (
+    TrainingRequest,
+    TrainingRequestQueueResult,
+    TrainingRequestReviewResult,
+)
 from .errors import ApiError, AuthError
 from .models import AccessContext, AuthState, DeviceAuthorizationSession
 
@@ -209,6 +213,20 @@ class TreqsApiClient:
         payload = self.request_json("POST", path, auth_state=auth_state)
         return TrainingRequestQueueResult.model_validate(_unwrap_data(payload))
 
+    def submit_training_request_review(
+        self,
+        auth_state: AuthState,
+        path: str,
+        json_payload: dict[str, object],
+    ) -> TrainingRequestReviewResult:
+        payload = self.request_json(
+            "POST",
+            path,
+            auth_state=auth_state,
+            json_payload=json_payload,
+        )
+        return TrainingRequestReviewResult.model_validate(_unwrap_data(payload))
+
     def create_project(
         self,
         auth_state: AuthState,
@@ -221,6 +239,14 @@ class TreqsApiClient:
             auth_state=auth_state,
             json_payload=json_payload,
         )
+        return Project.model_validate(_unwrap_data(payload))
+
+    def get_project(
+        self,
+        auth_state: AuthState,
+        path: str,
+    ) -> Project:
+        payload = self.request_json("GET", path, auth_state=auth_state)
         return Project.model_validate(_unwrap_data(payload))
 
     def list_compute_targets(
