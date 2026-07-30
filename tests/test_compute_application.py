@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+from pathlib import Path
+
+import click
 import pytest
 
 from treqs_cli.application.compute.models import (
@@ -7,18 +10,23 @@ from treqs_cli.application.compute.models import (
     ComputeTargetCreateInput,
     RegistrationCode,
     SecretInput,
+    SecretMetadata,
     compute_target_rows,
     parse_secret_assignment,
+    secret_rows,
     validate_secret_name,
 )
 from treqs_cli.application.compute.service import (
     ComputeTargetService,
+    compute_target_secret_path,
     compute_target_secrets_path,
     compute_targets_path,
     registration_codes_path,
     resolve_compute_target_id,
 )
-from treqs_cli.context import OwnerScope
+from treqs_cli.config import AuthStore, RepoContextStore
+from treqs_cli.context import OwnerScope, TreqsContext
+from treqs_cli.errors import ConfigError
 from treqs_cli.models import AuthState, RepoContext
 
 
@@ -187,6 +195,67 @@ def test_secret_name_validation_and_assignment_parsing() -> None:
         parse_secret_assignment("bad-name=value")
 
 
+def test_secret_rows_prefers_username_over_raw_id() -> None:
+    secrets = [
+        SecretMetadata(
+            id="secret-1",
+            name="HF_TOKEN",
+            createdAt="2026-07-01T00:00:00.000Z",
+            updatedAt="2026-07-02T00:00:00.000Z",
+            createdBy="user-1",
+            updatedBy="user-1",
+            createdByUsername="trevor",
+            updatedByUsername="trevor",
+        ),
+        SecretMetadata(
+            id="secret-2",
+            name="WANDB_API_KEY",
+            createdBy="user-2",
+            updatedBy="user-2",
+            # No usernames resolved -> falls back to the raw user id.
+        ),
+    ]
+
+    assert secret_rows(secrets) == [
+        {
+            "name": "HF_TOKEN",
+            "createdAt": "2026-07-01T00:00:00.000Z",
+            "updatedAt": "2026-07-02T00:00:00.000Z",
+            "createdBy": "trevor",
+            "updatedBy": "trevor",
+        },
+        {
+            "name": "WANDB_API_KEY",
+            "createdAt": "",
+            "updatedAt": "",
+            "createdBy": "user-2",
+            "updatedBy": "user-2",
+        },
+    ]
+
+
+def test_compute_target_service_list_and_delete_secret_paths() -> None:
+    client = _FakeComputeTargetClient()
+    auth_state = AuthState(api_url="https://api.treqs.ai", access_token="access-token")
+    scope = OwnerScope(owner_username="acme", current_username="trevor")
+    service = ComputeTargetService(client, auth_state, scope)
+
+    secrets = service.list_secrets("ct-1")
+    service.delete_secret("ct-1", "HF_TOKEN")
+
+    assert [s.name for s in secrets] == ["HF_TOKEN"]
+    assert compute_target_secret_path(scope, "ct-1", "HF_TOKEN") == (
+        "/api/v1/user/orgs/acme/compute-targets/ct-1/secrets/HF_TOKEN"
+    )
+    assert client.calls == [
+        ("list_secrets", "/api/v1/user/orgs/acme/compute-targets/ct-1/secrets"),
+        (
+            "delete_secret",
+            "/api/v1/user/orgs/acme/compute-targets/ct-1/secrets/HF_TOKEN",
+        ),
+    ]
+
+
 def test_compute_target_service_create_set_secret_and_registration_code_paths() -> None:
     client = _FakeComputeTargetClient()
     auth_state = AuthState(api_url="https://api.treqs.ai", access_token="access-token")
@@ -265,6 +334,21 @@ class _FakeComputeTargetClient:
     ) -> None:
         self.calls.append(("set_secret", path, json_payload))
 
+    def list_compute_target_secrets(
+        self,
+        _auth_state: AuthState,
+        path: str,
+    ) -> list[SecretMetadata]:
+        self.calls.append(("list_secrets", path))
+        return [SecretMetadata(id="secret-1", name="HF_TOKEN")]
+
+    def delete_compute_target_secret(
+        self,
+        _auth_state: AuthState,
+        path: str,
+    ) -> None:
+        self.calls.append(("delete_secret", path))
+
     def create_registration_code(
         self,
         _auth_state: AuthState,
@@ -272,3 +356,54 @@ class _FakeComputeTargetClient:
     ) -> RegistrationCode:
         self.calls.append(("registration_code", path))
         return RegistrationCode(id="rc-1", code="ABC123", computeTargetId="ct-1")
+
+
+def test_confirm_secret_delete_yes_bypasses_prompt_non_interactively() -> None:
+    from treqs_cli.commands.compute import _confirm_secret_delete
+
+    state = _build_treqs_context(Path("."), is_interactive=False)
+
+    # Should not raise / should not attempt to read stdin.
+    _confirm_secret_delete(state, "gpu-box", "HF_TOKEN", yes=True)
+
+
+def test_confirm_secret_delete_requires_yes_non_interactively() -> None:
+    from treqs_cli.commands.compute import _confirm_secret_delete
+
+    state = _build_treqs_context(Path("."), is_interactive=False)
+
+    with pytest.raises(ConfigError, match="--yes"):
+        _confirm_secret_delete(state, "gpu-box", "HF_TOKEN", yes=False)
+
+
+def test_confirm_secret_delete_prompts_and_proceeds_on_accept(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from treqs_cli.commands.compute import _confirm_secret_delete
+
+    state = _build_treqs_context(Path("."), is_interactive=True)
+    monkeypatch.setattr(click, "confirm", lambda *args, **kwargs: True)
+
+    _confirm_secret_delete(state, "gpu-box", "HF_TOKEN", yes=False)
+
+
+def test_confirm_secret_delete_aborts_when_declined(monkeypatch: pytest.MonkeyPatch) -> None:
+    from treqs_cli.commands.compute import _confirm_secret_delete
+
+    state = _build_treqs_context(Path("."), is_interactive=True)
+    monkeypatch.setattr(click, "confirm", lambda *args, **kwargs: False)
+
+    with pytest.raises(click.Abort):
+        _confirm_secret_delete(state, "gpu-box", "HF_TOKEN", yes=False)
+
+
+def _build_treqs_context(root: Path, *, is_interactive: bool) -> TreqsContext:
+    return TreqsContext(
+        api_url_override=None,
+        json_output=False,
+        auth_store=AuthStore(root / "auth.json"),
+        repo_context_store=RepoContextStore(root / ".treqs" / "config.toml"),
+        cwd=root,
+        repo_root=root,
+        is_interactive=is_interactive,
+    )

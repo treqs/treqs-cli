@@ -11,6 +11,7 @@ from .models import (
     ComputeTargetCreateInput,
     RegistrationCode,
     SecretInput,
+    SecretMetadata,
 )
 
 
@@ -35,6 +36,18 @@ class ComputeTargetApi(Protocol):
         auth_state: AuthState,
         path: str,
         json_payload: dict[str, object],
+    ) -> None: ...
+
+    def list_compute_target_secrets(
+        self,
+        auth_state: AuthState,
+        path: str,
+    ) -> list[SecretMetadata]: ...
+
+    def delete_compute_target_secret(
+        self,
+        auth_state: AuthState,
+        path: str,
     ) -> None: ...
 
     def create_registration_code(
@@ -71,6 +84,18 @@ class ComputeTargetService:
             secret.to_api_payload(),
         )
 
+    def list_secrets(self, target_id: str) -> Sequence[SecretMetadata]:
+        return self.client.list_compute_target_secrets(
+            self.auth_state,
+            compute_target_secrets_path(self.scope, target_id),
+        )
+
+    def delete_secret(self, target_id: str, name: str) -> None:
+        self.client.delete_compute_target_secret(
+            self.auth_state,
+            compute_target_secret_path(self.scope, target_id, name),
+        )
+
     def create_registration_code(self, target_id: str) -> RegistrationCode:
         return self.client.create_registration_code(
             self.auth_state,
@@ -95,6 +120,14 @@ def compute_target_secrets_path(
     target_id: str,
 ) -> str:
     return f"{compute_target_path(scope, target_id)}/secrets"
+
+
+def compute_target_secret_path(
+    scope: OwnerScope | RepoContext,
+    target_id: str,
+    name: str,
+) -> str:
+    return f"{compute_target_secrets_path(scope, target_id)}/{name}"
 
 
 def registration_codes_path(

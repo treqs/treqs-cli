@@ -31,6 +31,8 @@ OWNER_SCOPED = {
     "compute targets create",
     "compute targets registration-code create",
     "compute secrets set",
+    "compute secrets list",
+    "compute secrets delete",
 }
 
 REPO_BOUND = {

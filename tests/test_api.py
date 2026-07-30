@@ -3,8 +3,10 @@ from __future__ import annotations
 import json
 
 import httpx
+import pytest
 
 from treqs_cli.api import TreqsApiClient
+from treqs_cli.errors import ApiError
 from treqs_cli.models import AccessUser, AuthState
 
 
@@ -451,6 +453,89 @@ def test_compute_and_job_methods_use_owner_project_paths() -> None:
         ("GET", "/api/v1/user/projects/mnist/jobs", {"limit": "20", "status": "QUEUED"}),
         ("GET", "/api/v1/user/projects/mnist/jobs/job-1", {}),
     ]
+
+
+def test_secret_list_returns_metadata_only() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.method == "GET"
+        return httpx.Response(
+            200,
+            json={
+                "success": True,
+                "data": [
+                    {
+                        "id": "secret-1",
+                        "name": "HF_TOKEN",
+                        "createdAt": "2026-07-01T00:00:00.000Z",
+                        "updatedAt": "2026-07-02T00:00:00.000Z",
+                        "createdBy": "user-1",
+                        "updatedBy": "user-1",
+                        "createdByUsername": "trevor",
+                        "updatedByUsername": "trevor",
+                    }
+                ],
+            },
+        )
+
+    client = TreqsApiClient(
+        "https://api.treqs.ai",
+        http_client=httpx.Client(transport=httpx.MockTransport(handler)),
+    )
+    auth_state = AuthState(api_url="https://api.treqs.ai", access_token="access-token")
+
+    secrets = client.list_compute_target_secrets(
+        auth_state,
+        "/api/v1/user/orgs/acme/compute-targets/ct-1/secrets",
+    )
+
+    assert len(secrets) == 1
+    assert secrets[0].name == "HF_TOKEN"
+    assert secrets[0].createdByUsername == "trevor"
+    # The list endpoint never returns the secret value itself.
+    assert not hasattr(secrets[0], "value")
+
+
+def test_secret_delete_treats_204_no_content_as_success() -> None:
+    seen_requests: list[tuple[str, str]] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen_requests.append((request.method, request.url.path))
+        return httpx.Response(204)
+
+    client = TreqsApiClient(
+        "https://api.treqs.ai",
+        http_client=httpx.Client(transport=httpx.MockTransport(handler)),
+    )
+    auth_state = AuthState(api_url="https://api.treqs.ai", access_token="access-token")
+
+    client.delete_compute_target_secret(
+        auth_state,
+        "/api/v1/user/orgs/acme/compute-targets/ct-1/secrets/HF_TOKEN",
+    )
+
+    assert seen_requests == [
+        ("DELETE", "/api/v1/user/orgs/acme/compute-targets/ct-1/secrets/HF_TOKEN"),
+    ]
+
+
+def test_secret_delete_raises_api_error_for_missing_secret() -> None:
+    def handler(_request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            404,
+            json={"success": False, "error": {"code": "NOT_FOUND", "message": "Secret not found"}},
+        )
+
+    client = TreqsApiClient(
+        "https://api.treqs.ai",
+        http_client=httpx.Client(transport=httpx.MockTransport(handler)),
+    )
+    auth_state = AuthState(api_url="https://api.treqs.ai", access_token="access-token")
+
+    with pytest.raises(ApiError, match="Secret not found"):
+        client.delete_compute_target_secret(
+            auth_state,
+            "/api/v1/user/orgs/acme/compute-targets/ct-1/secrets/MISSING",
+        )
 
 
 def test_write_surface_methods_use_owner_paths_and_payloads() -> None:
