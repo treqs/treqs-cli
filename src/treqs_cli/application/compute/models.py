@@ -19,6 +19,7 @@ class ComputeTarget(BaseModel):
     status: str | None = None
     ownerId: str | None = None
     hasQueue: bool | None = None
+    startupBehavior: str | None = None
     agent: dict[str, Any] | None = None
 
 

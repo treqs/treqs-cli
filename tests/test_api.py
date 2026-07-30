@@ -785,6 +785,65 @@ def test_poll_job_logs_raises_http_timeout_above_poll_timeout() -> None:
     assert seen_timeouts[0] > 30.0
 
 
+def test_poll_job_updates_sends_cursor_and_uses_long_poll_timeout() -> None:
+    seen: list[tuple[str, dict[str, str], float | None]] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(
+            (
+                request.url.path,
+                dict(request.url.params.multi_items()),
+                request.extensions.get("timeout", {}).get("read"),
+            )
+        )
+        return httpx.Response(
+            200,
+            json={
+                "success": True,
+                "data": {
+                    "snapshot": {
+                        "jobStatus": "QUEUED",
+                        "phase": "provisioning",
+                        "message": "Provisioning compute target GPU",
+                        "actionRequired": None,
+                        "compute": {
+                            "targetId": "ct-1",
+                            "targetName": "GPU",
+                            "instanceId": "instance-1",
+                            "status": "launching",
+                            "attempt": 1,
+                        },
+                        "task": None,
+                        "lineagePublicationStatus": None,
+                    },
+                    "events": [],
+                    "nextCursor": "event-1",
+                    "terminal": False,
+                },
+            },
+        )
+
+    client = TreqsApiClient(
+        "https://api.treqs.ai",
+        http_client=httpx.Client(transport=httpx.MockTransport(handler)),
+    )
+    updates = client.poll_job_updates(
+        AuthState(api_url="https://api.treqs.ai", access_token="access-token"),
+        "/api/v1/user/projects/mnist/jobs/job-1/updates",
+        cursor="event-1",
+        timeout_ms=25000,
+    )
+
+    assert updates.snapshot.phase == "provisioning"
+    assert seen == [
+        (
+            "/api/v1/user/projects/mnist/jobs/job-1/updates",
+            {"timeout": "25000", "cursor": "event-1"},
+            40.0,
+        )
+    ]
+
+
 def _access_context_payload() -> dict[str, object]:
     return {
         "user": {

@@ -13,6 +13,7 @@ from .application.compute.models import (
     SecretMetadata,
 )
 from .application.jobs.models import (
+    JobUpdates,
     LineageRepublishResult,
     LogPollResult,
     ProjectJobs,
@@ -382,6 +383,26 @@ class TreqsApiClient:
     ) -> TrainingJob:
         payload = self.request_json("GET", path, auth_state=auth_state)
         return TrainingJob.model_validate(_unwrap_data(payload))
+
+    def poll_job_updates(
+        self,
+        auth_state: AuthState,
+        path: str,
+        *,
+        cursor: str | None,
+        timeout_ms: int,
+    ) -> JobUpdates:
+        params: dict[str, Any] = {"timeout": timeout_ms}
+        if cursor is not None:
+            params["cursor"] = cursor
+        payload = self.request_json(
+            "GET",
+            path,
+            auth_state=auth_state,
+            params=params,
+            timeout=timeout_ms / 1000.0 + 15.0,
+        )
+        return JobUpdates.model_validate(_unwrap_data(payload))
 
     def republish_job_lineage(
         self,

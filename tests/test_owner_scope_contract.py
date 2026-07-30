@@ -55,6 +55,7 @@ REPO_BOUND = {
     "jobs cancel",
     "jobs logs",
     "jobs wait",
+    "jobs watch",
     "jobs republish-lineage",
 }
 
