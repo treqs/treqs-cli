@@ -91,6 +91,8 @@ def test_jobs_watch_sends_lifecycle_to_stderr_and_workload_logs_to_stdout(
     assert result.stdout == "workload output\n"
     assert "queued" in result.stderr
     assert "Job queued" in result.stderr
+    assert "repository" in result.stderr
+    assert "Preparing repository" in result.stderr
     assert "completed" in result.stderr
 
 
@@ -111,13 +113,20 @@ def _completed_updates() -> JobUpdates:
             ),
             JobLifecycleEvent(
                 id="event-2",
+                kind="execution.repository_preparing",
+                occurredAt="2026-07-30T12:03:02.000Z",
+                severity="info",
+                message="Preparing repository",
+            ),
+            JobLifecycleEvent(
+                id="event-3",
                 kind="job.completed",
                 occurredAt="2026-07-30T12:08:47.000Z",
                 severity="info",
                 message="Job completed",
             ),
         ],
-        nextCursor="event-2",
+        nextCursor="event-3",
         terminal=True,
     )
 
