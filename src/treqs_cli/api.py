@@ -6,7 +6,7 @@ from typing import Any, cast
 
 import httpx
 
-from .application.compute.models import ComputeTarget, RegistrationCode
+from .application.compute.models import AwsLaunchOptions, ComputeTarget, RegistrationCode
 from .application.jobs.models import (
     LineageRepublishResult,
     LogPollResult,
@@ -273,6 +273,21 @@ class TreqsApiClient:
             json_payload=json_payload,
         )
         return ComputeTarget.model_validate(_unwrap_data(payload))
+
+    def get_provider_launch_options(
+        self,
+        auth_state: AuthState,
+        path: str,
+        *,
+        region: str,
+    ) -> AwsLaunchOptions:
+        payload = self.request_json(
+            "GET",
+            path,
+            auth_state=auth_state,
+            params={"region": region},
+        )
+        return AwsLaunchOptions.model_validate(_unwrap_data(payload))
 
     def set_compute_target_secret(
         self,

@@ -1,9 +1,13 @@
 from __future__ import annotations
 
+from collections.abc import Callable, Sequence
+from typing import TypeVar
+
 import click
 
 from ..api import TreqsApiClient
 from ..application.compute.models import (
+    AwsLaunchOptions,
     ComputeTarget,
     ComputeTargetCreateInput,
     compute_target_rows,
@@ -18,6 +22,8 @@ from ..errors import ConfigError, TreqsCliError
 from ..help_text import examples
 from ..output import emit_json, render_table
 from .shared import load_access_context, owner_option, resolve_owner_scope
+
+T = TypeVar("T")
 
 
 @click.group("compute")
@@ -129,6 +135,33 @@ def compute_targets_list_command(
     "--region", default="any", show_default=True, help="Region (or 'any') for on-demand targets."
 )
 @click.option(
+    "--ami-id",
+    help=(
+        "AWS AMI ID (--type aws only; required for AWS launches). Omit in an "
+        "interactive session with a concrete --region to pick one from a live list."
+    ),
+)
+@click.option(
+    "--subnet-id",
+    "subnet_ids",
+    multiple=True,
+    help=(
+        "AWS subnet ID (--type aws only; repeatable). The first is the primary "
+        "subnet; additional ones are fallback candidates tried on a per-AZ "
+        "capacity error. Optional - AWS uses the account/VPC default if unset."
+    ),
+)
+@click.option(
+    "--security-group-id",
+    "security_group_ids",
+    multiple=True,
+    help="AWS security group ID (--type aws only; repeatable, optional).",
+)
+@click.option(
+    "--ssh-key-name",
+    help="AWS EC2 key pair name to attach to the instance (--type aws only, optional).",
+)
+@click.option(
     "--install-roar",
     is_flag=True,
     help="Install roar on the instance at startup via the managed bootstrap (on-demand).",
@@ -161,6 +194,10 @@ def compute_targets_create_command(
     target_type: str | None,
     instance_type: str | None,
     region: str,
+    ami_id: str | None,
+    subnet_ids: tuple[str, ...],
+    security_group_ids: tuple[str, ...],
+    ssh_key_name: str | None,
     install_roar: bool,
     roar_ref: str | None,
     userdata_script: str | None,
@@ -182,13 +219,26 @@ def compute_targets_create_command(
     auth_state, access_context = load_access_context(state)
     scope = resolve_owner_scope(state, access_context, owner)
     with TreqsApiClient(auth_state.api_url) as client:
-        target = ComputeTargetService(client, auth_state, scope).create(
+        service = ComputeTargetService(client, auth_state, scope)
+
+        if effective_type == "aws" and ami_id is None:
+            ami_id, wizard_subnet_ids, wizard_security_group_ids = _resolve_aws_resources(
+                state, service, region, subnet_ids, security_group_ids
+            )
+            subnet_ids = wizard_subnet_ids
+            security_group_ids = wizard_security_group_ids
+
+        target = service.create(
             ComputeTargetCreateInput(
                 name=name,
                 kind=kind,
                 type=effective_type,
                 instance_type=instance_type,
                 region=region,
+                ami_id=ami_id,
+                subnet_ids=subnet_ids,
+                security_group_ids=security_group_ids,
+                ssh_key_name=ssh_key_name,
                 install_roar=install_roar,
                 roar_ref=roar_ref,
                 userdata_script=userdata_script,
@@ -206,6 +256,141 @@ def compute_targets_create_command(
     click.echo(f"ID: {target.id}")
     click.echo(f"Kind: {target.kind or kind}")
     click.echo(f"Type: {target.type}")
+
+
+def _resolve_aws_resources(
+    state: TreqsContext,
+    service: ComputeTargetService,
+    region: str,
+    subnet_ids: tuple[str, ...],
+    security_group_ids: tuple[str, ...],
+) -> tuple[str, tuple[str, ...], tuple[str, ...]]:
+    """Resolve an AWS on-demand target's AMI (required) and, if not already
+    passed via flags, its subnet(s)/security group(s).
+
+    Interactively walks the same AMI -> primary subnet (+ optional fallback
+    subnets) -> security groups sequence as the dashboard's create wizard,
+    backed by the same GET /provider-credentials/aws/launch-options data an
+    agent could also call directly. Non-interactively, --ami-id must be
+    passed explicitly since there is nothing to prompt.
+    """
+    if not state.is_interactive:
+        raise ConfigError(
+            "--ami-id is required for AWS on-demand targets (AWS EC2 launches fail "
+            "without one). Run interactively with a concrete --region to select one "
+            "from a live list, or pass --ami-id explicitly."
+        )
+    if region == "any":
+        raise ConfigError(
+            "AWS resource selection needs a concrete --region (not 'any') to look up "
+            "AMIs/subnets/security groups for."
+        )
+
+    click.echo(f"Fetching AWS launch options for {region}...")
+    options: AwsLaunchOptions = service.get_aws_launch_options(region)
+    errors = options.errors or {}
+
+    selected_ami = _prompt_choice(
+        "AMI",
+        options.amis,
+        format_item=lambda ami: f"{ami.name}  ({ami.id})",
+        get_id=lambda ami: ami.id,
+        required=True,
+        error=errors.get("amis"),
+    )
+    assert selected_ami is not None  # required=True guarantees a non-None return
+
+    resolved_subnet_ids = list(subnet_ids)
+    if not resolved_subnet_ids:
+        remaining_subnets = list(options.subnets)
+        primary = _prompt_choice(
+            "primary subnet",
+            remaining_subnets,
+            format_item=lambda s: f"{s.id}  (az={s.availabilityZone})"
+            + (f"  {s.name}" if s.name else ""),
+            get_id=lambda s: s.id,
+            required=False,
+            error=errors.get("subnets"),
+        )
+        if primary is not None:
+            resolved_subnet_ids.append(primary)
+            remaining_subnets = [s for s in remaining_subnets if s.id != primary]
+            while remaining_subnets and click.confirm(
+                "Add a fallback subnet (tried if the primary is out of capacity)?",
+                default=False,
+            ):
+                fallback = _prompt_choice(
+                    "fallback subnet",
+                    remaining_subnets,
+                    format_item=lambda s: f"{s.id}  (az={s.availabilityZone})"
+                    + (f"  {s.name}" if s.name else ""),
+                    get_id=lambda s: s.id,
+                    required=False,
+                )
+                if fallback is None:
+                    break
+                resolved_subnet_ids.append(fallback)
+                remaining_subnets = [s for s in remaining_subnets if s.id != fallback]
+
+    resolved_security_group_ids = list(security_group_ids)
+    if not resolved_security_group_ids and options.securityGroups:
+        remaining_groups = list(options.securityGroups)
+        while remaining_groups and click.confirm("Add a security group?", default=False):
+            group = _prompt_choice(
+                "security group",
+                remaining_groups,
+                format_item=lambda g: f"{g.name}  ({g.id})",
+                get_id=lambda g: g.id,
+                required=False,
+            )
+            if group is None:
+                break
+            resolved_security_group_ids.append(group)
+            remaining_groups = [g for g in remaining_groups if g.id != group]
+
+    return selected_ami, tuple(resolved_subnet_ids), tuple(resolved_security_group_ids)
+
+
+def _prompt_choice(
+    label: str,
+    items: Sequence[T],
+    *,
+    format_item: Callable[[T], str],
+    get_id: Callable[[T], str],
+    required: bool,
+    error: str | None = None,
+) -> str | None:
+    """Print a numbered list and prompt for a selection.
+
+    Returns the selected item's id, or None if the caller allowed skipping
+    (required=False) and either nothing was available or the user skipped.
+    """
+    if not items:
+        detail = f" ({error})" if error else ""
+        if required:
+            raise ConfigError(f"No {label} options available for this region{detail}.")
+        click.echo(f"No {label} options found{detail}; skipping.")
+        return None
+
+    click.echo(f"\nAvailable {label}s:")
+    for index, item in enumerate(items, start=1):
+        click.echo(f"  {index}) {format_item(item)}")
+
+    while True:
+        raw = click.prompt(
+            f"Select {label}" + ("" if required else " (blank to skip)"),
+            default="",
+            show_default=False,
+        )
+        if not raw:
+            if required:
+                click.echo("A selection is required.")
+                continue
+            return None
+        if not raw.isdigit() or not (1 <= int(raw) <= len(items)):
+            click.echo(f"Enter a number between 1 and {len(items)}.")
+            continue
+        return get_id(items[int(raw) - 1])
 
 
 @compute_group.group("secrets")

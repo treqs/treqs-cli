@@ -37,6 +37,15 @@ class ComputeTargetCreateInput(BaseModel):
     auto_shutdown: bool = False
     idle_timeout_minutes: int | None = None
     description: str | None = None
+    # AWS-specific (see aws-provider.ts's AwsResources): amiId is required for AWS
+    # launches; subnet/security-group/ssh-key are optional (AWS falls back to
+    # account/VPC defaults when unset).
+    ami_id: str | None = None
+    # Ordered AZ candidates; first is primary, the rest are fallback subnets tried
+    # in turn on a per-AZ capacity error (mirrors resources.subnetIds).
+    subnet_ids: tuple[str, ...] = ()
+    security_group_ids: tuple[str, ...] = ()
+    ssh_key_name: str | None = None
 
     def to_api_payload(self) -> dict[str, object]:
         if self.kind != "on-demand":
@@ -57,6 +66,14 @@ class ComputeTargetCreateInput(BaseModel):
             resources["roarRef"] = self.roar_ref
         if self.userdata_script is not None:
             resources["userdataScript"] = self.userdata_script
+        if self.ami_id is not None:
+            resources["amiId"] = self.ami_id
+        if self.subnet_ids:
+            resources["subnetIds"] = list(self.subnet_ids)
+        if self.security_group_ids:
+            resources["securityGroupIds"] = list(self.security_group_ids)
+        if self.ssh_key_name is not None:
+            resources["sshKeyName"] = self.ssh_key_name
 
         payload: dict[str, object] = {
             "kind": "on-demand",
@@ -77,6 +94,49 @@ class ComputeTargetCreateInput(BaseModel):
         if self.idle_timeout_minutes is not None:
             payload["idleTimeoutMinutes"] = self.idle_timeout_minutes
         return payload
+
+
+class AwsAmiOption(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
+    id: str
+    name: str
+    description: str | None = None
+    architecture: str | None = None
+    creationDate: str | None = None
+
+
+class AwsSubnetOption(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
+    id: str
+    name: str | None = None
+    vpcId: str
+    availabilityZone: str
+    cidrBlock: str | None = None
+    isDefault: bool | None = None
+    availableIpAddressCount: int | None = None
+
+
+class AwsSecurityGroupOption(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
+    id: str
+    name: str
+    description: str | None = None
+    vpcId: str | None = None
+
+
+class AwsLaunchOptions(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
+    amis: list[AwsAmiOption] = []
+    subnets: list[AwsSubnetOption] = []
+    securityGroups: list[AwsSecurityGroupOption] = []
+    # Per-resource discovery failures (e.g. missing ec2:DescribeSubnets permission).
+    # An empty list with no entry here means the account genuinely has none of
+    # that resource in the region, not that discovery failed.
+    errors: dict[str, str] | None = None
 
 
 class SecretInput(BaseModel):

@@ -7,6 +7,7 @@ from typing import Protocol
 from ...context import OwnerScope, owner_path
 from ...models import AuthState, RepoContext
 from .models import (
+    AwsLaunchOptions,
     ComputeTarget,
     ComputeTargetCreateInput,
     RegistrationCode,
@@ -29,6 +30,14 @@ class ComputeTargetApi(Protocol):
         path: str,
         json_payload: dict[str, object],
     ) -> ComputeTarget: ...
+
+    def get_provider_launch_options(
+        self,
+        auth_state: AuthState,
+        path: str,
+        *,
+        region: str,
+    ) -> AwsLaunchOptions: ...
 
     def set_compute_target_secret(
         self,
@@ -64,6 +73,13 @@ class ComputeTargetService:
             create_input.to_api_payload(),
         )
 
+    def get_aws_launch_options(self, region: str) -> AwsLaunchOptions:
+        return self.client.get_provider_launch_options(
+            self.auth_state,
+            provider_launch_options_path(self.scope, "aws"),
+            region=region,
+        )
+
     def set_secret(self, target_id: str, secret: SecretInput) -> None:
         self.client.set_compute_target_secret(
             self.auth_state,
@@ -83,6 +99,14 @@ def compute_targets_path(scope: OwnerScope | RepoContext) -> str:
         scope.owner_username,
         scope.current_username,
         "/compute-targets",
+    )
+
+
+def provider_launch_options_path(scope: OwnerScope | RepoContext, provider: str) -> str:
+    return owner_path(
+        scope.owner_username,
+        scope.current_username,
+        f"/provider-credentials/{provider}/launch-options",
     )
 
 
