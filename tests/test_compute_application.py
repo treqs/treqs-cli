@@ -6,6 +6,10 @@ import click
 import pytest
 
 from treqs_cli.application.compute.models import (
+    AwsAmiOption,
+    AwsLaunchOptions,
+    AwsSecurityGroupOption,
+    AwsSubnetOption,
     ComputeTarget,
     ComputeTargetCreateInput,
     RegistrationCode,
@@ -21,9 +25,11 @@ from treqs_cli.application.compute.service import (
     compute_target_secret_path,
     compute_target_secrets_path,
     compute_targets_path,
+    provider_launch_options_path,
     registration_codes_path,
     resolve_compute_target_id,
 )
+from treqs_cli.commands.compute import _prompt_choice, _resolve_aws_resources
 from treqs_cli.config import AuthStore, RepoContextStore
 from treqs_cli.context import OwnerScope, TreqsContext
 from treqs_cli.errors import ConfigError
@@ -178,6 +184,233 @@ def test_compute_target_create_input_pins_roar_ref_for_source_build() -> None:
     assert "roarRef" not in default_resources
 
 
+def test_compute_target_create_input_builds_aws_payload_with_network_fields() -> None:
+    create_input = ComputeTargetCreateInput(
+        name="AWS GPU",
+        kind="on-demand",
+        type="aws",
+        instance_type="g5.xlarge",
+        region="us-west-2",
+        ami_id="ami-1234567890",
+        subnet_ids=("subnet-primary", "subnet-fallback"),
+        security_group_ids=("sg-1", "sg-2"),
+        ssh_key_name="treqs-key",
+    )
+
+    resources = create_input.to_api_payload()["resources"]
+    assert resources == {
+        "region": "us-west-2",
+        "instanceType": "g5.xlarge",
+        "amiId": "ami-1234567890",
+        "subnetIds": ["subnet-primary", "subnet-fallback"],
+        "securityGroupIds": ["sg-1", "sg-2"],
+        "sshKeyName": "treqs-key",
+    }
+
+
+def test_compute_target_create_input_omits_aws_fields_when_unset() -> None:
+    resources = ComputeTargetCreateInput(
+        name="RunPod CPU", kind="on-demand", type="runpod", instance_type="cpu3c"
+    ).to_api_payload()["resources"]
+
+    assert isinstance(resources, dict)
+    for key in ("amiId", "subnetIds", "securityGroupIds", "sshKeyName"):
+        assert key not in resources
+
+
+def test_compute_target_service_fetches_aws_launch_options() -> None:
+    client = _FakeComputeTargetClient()
+    auth_state = AuthState(api_url="https://api.treqs.ai", access_token="access-token")
+    scope = OwnerScope(owner_username="acme", current_username="trevor")
+    service = ComputeTargetService(client, auth_state, scope)
+
+    options = service.get_aws_launch_options("us-west-2")
+
+    assert options.amis[0].id == "ami-1"
+    assert provider_launch_options_path(scope, "aws") == (
+        "/api/v1/user/orgs/acme/provider-credentials/aws/launch-options"
+    )
+    assert client.calls == [
+        (
+            "launch_options",
+            "/api/v1/user/orgs/acme/provider-credentials/aws/launch-options",
+            "us-west-2",
+        ),
+    ]
+
+
+def test_prompt_choice_required_selects_valid_index(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(click, "prompt", lambda *args, **kwargs: "2")
+
+    result = _prompt_choice(
+        "item", ["a", "b", "c"], format_item=lambda i: i, get_id=lambda i: i, required=True
+    )
+
+    assert result == "b"
+
+
+def test_prompt_choice_required_reprompts_on_invalid_input(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    responses = iter(["nope", "9", "1"])
+    monkeypatch.setattr(click, "prompt", lambda *args, **kwargs: next(responses))
+
+    result = _prompt_choice(
+        "item", ["a", "b"], format_item=lambda i: i, get_id=lambda i: i, required=True
+    )
+
+    assert result == "a"
+
+
+def test_prompt_choice_optional_blank_input_skips(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(click, "prompt", lambda *args, **kwargs: "")
+
+    result = _prompt_choice(
+        "item", ["a", "b"], format_item=lambda i: i, get_id=lambda i: i, required=False
+    )
+
+    assert result is None
+
+
+def test_prompt_choice_optional_with_no_items_skips_without_prompting(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def fail_prompt(*_args: object, **_kwargs: object) -> str:
+        raise AssertionError("should not prompt when there are no items")
+
+    monkeypatch.setattr(click, "prompt", fail_prompt)
+
+    result = _prompt_choice(
+        "item", [], format_item=lambda i: i, get_id=lambda i: i, required=False
+    )
+
+    assert result is None
+
+
+def test_prompt_choice_required_with_no_items_raises() -> None:
+    with pytest.raises(ConfigError, match="No item options"):
+        _prompt_choice("item", [], format_item=lambda i: i, get_id=lambda i: i, required=True)
+
+
+def test_resolve_aws_resources_requires_ami_id_non_interactively() -> None:
+    state = _build_treqs_context(Path("."), is_interactive=False)
+    service = ComputeTargetService(
+        _FakeComputeTargetClient(),
+        AuthState(api_url="https://api.treqs.ai", access_token="t"),
+        OwnerScope(owner_username="acme", current_username="trevor"),
+    )
+
+    with pytest.raises(ConfigError, match="--ami-id"):
+        _resolve_aws_resources(state, service, "us-west-2", (), ())
+
+
+def test_resolve_aws_resources_requires_concrete_region_interactively(tmp_path: Path) -> None:
+    state = _build_treqs_context(tmp_path, is_interactive=True)
+    service = ComputeTargetService(
+        _FakeComputeTargetClient(),
+        AuthState(api_url="https://api.treqs.ai", access_token="t"),
+        OwnerScope(owner_username="acme", current_username="trevor"),
+    )
+
+    with pytest.raises(ConfigError, match="concrete --region"):
+        _resolve_aws_resources(state, service, "any", (), ())
+
+
+def test_resolve_aws_resources_full_interactive_flow(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    state = _build_treqs_context(tmp_path, is_interactive=True)
+    client = _FakeComputeTargetClient()
+    service = ComputeTargetService(
+        client,
+        AuthState(api_url="https://api.treqs.ai", access_token="t"),
+        OwnerScope(owner_username="acme", current_username="trevor"),
+    )
+
+    # AMI (required) -> "1"; primary subnet -> "1". The fake client only has one
+    # subnet/security group, so no fallback-subnet/security-group prompt fires.
+    prompts = iter(["1", "1"])
+    monkeypatch.setattr(click, "prompt", lambda *args, **kwargs: next(prompts))
+    monkeypatch.setattr(click, "confirm", lambda *args, **kwargs: False)
+
+    ami_id, subnet_ids, security_group_ids = _resolve_aws_resources(
+        state, service, "us-west-2", (), ()
+    )
+
+    assert ami_id == "ami-1"
+    assert subnet_ids == ("subnet-1",)
+    assert security_group_ids == ()
+
+
+def test_resolve_aws_resources_skips_prompts_already_covered_by_flags(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    state = _build_treqs_context(tmp_path, is_interactive=True)
+    client = _FakeComputeTargetClient()
+    service = ComputeTargetService(
+        client,
+        AuthState(api_url="https://api.treqs.ai", access_token="t"),
+        OwnerScope(owner_username="acme", current_username="trevor"),
+    )
+
+    # Only the AMI prompt should fire: subnet/security-group were already
+    # passed via flags.
+    monkeypatch.setattr(click, "prompt", lambda *args, **kwargs: "1")
+
+    def fail_confirm(*_args: object, **_kwargs: object) -> bool:
+        raise AssertionError("should not prompt to add subnets/security groups")
+
+    monkeypatch.setattr(click, "confirm", fail_confirm)
+
+    ami_id, subnet_ids, security_group_ids = _resolve_aws_resources(
+        state, service, "us-west-2", ("subnet-preset",), ("sg-preset",)
+    )
+
+    assert ami_id == "ami-1"
+    assert subnet_ids == ("subnet-preset",)
+    assert security_group_ids == ("sg-preset",)
+
+
+def test_resolve_aws_resources_adds_fallback_subnet_and_security_group(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    state = _build_treqs_context(tmp_path, is_interactive=True)
+    client = _FakeComputeTargetClientWithManyAwsOptions()
+    service = ComputeTargetService(
+        client,
+        AuthState(api_url="https://api.treqs.ai", access_token="t"),
+        OwnerScope(owner_username="acme", current_username="trevor"),
+    )
+
+    # AMI -> "1"; primary subnet -> "1"; fallback subnet -> "1" (the only
+    # remaining one, subnet-2); security group -> "2" (sg-2).
+    prompts = iter(["1", "1", "1", "2"])
+    monkeypatch.setattr(click, "prompt", lambda *args, **kwargs: next(prompts))
+    # Add a fallback subnet: yes. Add a security group: yes, then no more.
+    confirms = iter([True, True, False])
+    monkeypatch.setattr(click, "confirm", lambda *args, **kwargs: next(confirms))
+
+    ami_id, subnet_ids, security_group_ids = _resolve_aws_resources(
+        state, service, "us-west-2", (), ()
+    )
+
+    assert ami_id == "ami-1"
+    assert subnet_ids == ("subnet-1", "subnet-2")
+    assert security_group_ids == ("sg-2",)
+
+
+def _build_treqs_context(root: Path, *, is_interactive: bool) -> TreqsContext:
+    return TreqsContext(
+        api_url_override=None,
+        json_output=False,
+        auth_store=AuthStore(root / "auth.json"),
+        repo_context_store=RepoContextStore(root / ".treqs" / "config.toml"),
+        cwd=root,
+        repo_root=root,
+        is_interactive=is_interactive,
+    )
+
+
 def test_secret_name_validation_and_assignment_parsing() -> None:
     assert validate_secret_name("API_KEY") == "API_KEY"
     assert validate_secret_name("S3_2") == "S3_2"
@@ -326,6 +559,22 @@ class _FakeComputeTargetClient:
             kind=str(json_payload["kind"]),
         )
 
+    def get_provider_launch_options(
+        self,
+        _auth_state: AuthState,
+        path: str,
+        *,
+        region: str,
+    ) -> AwsLaunchOptions:
+        self.calls.append(("launch_options", path, region))
+        return AwsLaunchOptions(
+            amis=[AwsAmiOption(id="ami-1", name="Ubuntu 22.04")],
+            subnets=[
+                AwsSubnetOption(id="subnet-1", vpcId="vpc-1", availabilityZone="us-west-2a")
+            ],
+            securityGroups=[AwsSecurityGroupOption(id="sg-1", name="default")],
+        )
+
     def set_compute_target_secret(
         self,
         _auth_state: AuthState,
@@ -356,6 +605,31 @@ class _FakeComputeTargetClient:
     ) -> RegistrationCode:
         self.calls.append(("registration_code", path))
         return RegistrationCode(id="rc-1", code="ABC123", computeTargetId="ct-1")
+
+
+class _FakeComputeTargetClientWithManyAwsOptions(_FakeComputeTargetClient):
+    """Variant with multiple subnets/security groups, for fallback-subnet and
+    extra-security-group wizard coverage."""
+
+    def get_provider_launch_options(
+        self,
+        _auth_state: AuthState,
+        path: str,
+        *,
+        region: str,
+    ) -> AwsLaunchOptions:
+        self.calls.append(("launch_options", path, region))
+        return AwsLaunchOptions(
+            amis=[AwsAmiOption(id="ami-1", name="Ubuntu 22.04")],
+            subnets=[
+                AwsSubnetOption(id="subnet-1", vpcId="vpc-1", availabilityZone="us-west-2a"),
+                AwsSubnetOption(id="subnet-2", vpcId="vpc-1", availabilityZone="us-west-2b"),
+            ],
+            securityGroups=[
+                AwsSecurityGroupOption(id="sg-1", name="default"),
+                AwsSecurityGroupOption(id="sg-2", name="ssh"),
+            ],
+        )
 
 
 def test_confirm_secret_delete_yes_bypasses_prompt_non_interactively() -> None:
@@ -395,15 +669,3 @@ def test_confirm_secret_delete_aborts_when_declined(monkeypatch: pytest.MonkeyPa
 
     with pytest.raises(click.Abort):
         _confirm_secret_delete(state, "gpu-box", "HF_TOKEN", yes=False)
-
-
-def _build_treqs_context(root: Path, *, is_interactive: bool) -> TreqsContext:
-    return TreqsContext(
-        api_url_override=None,
-        json_output=False,
-        auth_store=AuthStore(root / "auth.json"),
-        repo_context_store=RepoContextStore(root / ".treqs" / "config.toml"),
-        cwd=root,
-        repo_root=root,
-        is_interactive=is_interactive,
-    )

@@ -455,6 +455,53 @@ def test_compute_and_job_methods_use_owner_project_paths() -> None:
     ]
 
 
+def test_get_provider_launch_options_sends_region_and_parses_data() -> None:
+    seen_requests: list[tuple[str, str, dict[str, str]]] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen_requests.append(
+            (request.method, request.url.path, dict(request.url.params.multi_items()))
+        )
+        return httpx.Response(
+            200,
+            json={
+                "success": True,
+                "data": {
+                    "amis": [{"id": "ami-1", "name": "Ubuntu 22.04", "description": "canonical"}],
+                    "subnets": [
+                        {"id": "subnet-1", "vpcId": "vpc-1", "availabilityZone": "us-west-2a"}
+                    ],
+                    "securityGroups": [{"id": "sg-1", "name": "default"}],
+                    "errors": {"securityGroups": "ec2:DescribeSecurityGroups denied"},
+                },
+            },
+        )
+
+    client = TreqsApiClient(
+        "https://api.treqs.ai",
+        http_client=httpx.Client(transport=httpx.MockTransport(handler)),
+    )
+    auth_state = AuthState(api_url="https://api.treqs.ai", access_token="access-token")
+
+    options = client.get_provider_launch_options(
+        auth_state,
+        "/api/v1/user/orgs/acme/provider-credentials/aws/launch-options",
+        region="us-west-2",
+    )
+
+    assert options.amis[0].id == "ami-1"
+    assert options.subnets[0].availabilityZone == "us-west-2a"
+    assert options.securityGroups[0].name == "default"
+    assert options.errors == {"securityGroups": "ec2:DescribeSecurityGroups denied"}
+    assert seen_requests == [
+        (
+            "GET",
+            "/api/v1/user/orgs/acme/provider-credentials/aws/launch-options",
+            {"region": "us-west-2"},
+        ),
+    ]
+
+
 def test_secret_list_returns_metadata_only() -> None:
     def handler(request: httpx.Request) -> httpx.Response:
         assert request.method == "GET"

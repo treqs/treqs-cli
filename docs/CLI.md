@@ -723,6 +723,18 @@ Options:
                                 (e.g. cpu3c).
   --region TEXT                 Region (or 'any') for on-demand targets.
                                 [default: any]
+  --ami-id TEXT                 AWS AMI ID (--type aws only; required for AWS
+                                launches). Omit in an interactive session with a
+                                concrete --region to pick one from a live list.
+  --subnet-id TEXT              AWS subnet ID (--type aws only; repeatable). The
+                                first is the primary subnet; additional ones are
+                                fallback candidates tried on a per-AZ capacity
+                                error. Optional - AWS uses the account/VPC
+                                default if unset.
+  --security-group-id TEXT      AWS security group ID (--type aws only;
+                                repeatable, optional).
+  --ssh-key-name TEXT           AWS EC2 key pair name to attach to the instance
+                                (--type aws only, optional).
   --install-roar                Install roar on the instance at startup via the
                                 managed bootstrap (on-demand).
   --roar-ref TEXT               Pin roar to a git ref (branch/tag) built from
