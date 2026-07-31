@@ -988,6 +988,142 @@ def test_compute_targets_list_can_run_without_repo_context(
     ]
 
 
+def test_json_flag_is_recognized_at_any_position(
+    monkeypatch: Any,
+    tmp_path: Path,
+) -> None:
+    config_home = tmp_path / "config"
+    work_dir = tmp_path / "work"
+    work_dir.mkdir()
+    AuthStore(config_home / "auth.json").save(
+        AuthState(api_url="https://api.treqs.ai", access_token="access-token")
+    )
+
+    class FakeClient:
+        def __init__(self, api_url: str) -> None:
+            self.api_url = api_url
+
+        def __enter__(self) -> FakeClient:
+            return self
+
+        def __exit__(self, *_exc: object) -> None:
+            return None
+
+        def get_access_context(self, _auth_state: AuthState) -> AccessContext:
+            return AccessContext.model_validate(_access_context_payload())
+
+        def list_compute_targets(
+            self,
+            auth_state: AuthState,
+            path: str,
+            *,
+            include_agent: bool = False,
+        ) -> list[ComputeTarget]:
+            return [ComputeTarget(id="ct-1", name="GPU", type="dedicated", kind="dedicated")]
+
+    monkeypatch.setattr("treqs_cli.commands.compute.TreqsApiClient", FakeClient)
+    monkeypatch.setattr("treqs_cli.commands.shared.TreqsApiClient", FakeClient)
+    monkeypatch.chdir(work_dir)
+    env = {"TREQS_CONFIG_HOME": str(config_home)}
+    runner = CliRunner()
+
+    before = runner.invoke(
+        cli,
+        ["--json", "compute", "targets", "list", "--owner", "trevor"],
+        env=env,
+        catch_exceptions=False,
+    )
+    mid = runner.invoke(
+        cli,
+        ["compute", "--json", "targets", "list", "--owner", "trevor"],
+        env=env,
+        catch_exceptions=False,
+    )
+    after = runner.invoke(
+        cli,
+        ["compute", "targets", "list", "--owner", "trevor", "--json"],
+        env=env,
+        catch_exceptions=False,
+    )
+    no_flag = runner.invoke(
+        cli,
+        ["compute", "targets", "list", "--owner", "trevor"],
+        env=env,
+        catch_exceptions=False,
+    )
+
+    for label, result in [("before", before), ("mid", mid), ("after", after)]:
+        assert result.exit_code == 0, f"{label}: {result.output}"
+        assert json.loads(result.output)[0]["id"] == "ct-1", label
+
+    assert no_flag.exit_code == 0, no_flag.output
+    assert "Compute targets for" in no_flag.output
+
+
+def test_json_flag_after_double_dash_is_a_literal_positional_value(
+    monkeypatch: Any,
+    tmp_path: Path,
+) -> None:
+    config_home = tmp_path / "config"
+    work_repo = tmp_path / "repo"
+    work_repo.mkdir()
+    (work_repo / ".git").mkdir()
+    AuthStore(config_home / "auth.json").save(
+        AuthState(api_url="https://api.treqs.ai", access_token="access-token")
+    )
+    RepoContextStore(work_repo / ".treqs" / "config.toml").save(
+        RepoContext(
+            api_url="https://api.treqs.ai",
+            owner_id="owner-1",
+            owner_type="user",
+            owner_username="trevor",
+            owner_display_name="Trevor",
+            project_id="project-1",
+            project_slug="mnist",
+            project_name="MNIST",
+            current_username="trevor",
+        )
+    )
+
+    calls: list[str] = []
+
+    class FakeClient:
+        def __init__(self, api_url: str) -> None:
+            self.api_url = api_url
+
+        def __enter__(self) -> FakeClient:
+            return self
+
+        def __exit__(self, *_exc: object) -> None:
+            return None
+
+        def get_training_request(self, auth_state: AuthState, path: str) -> TrainingRequest:
+            calls.append(path)
+            return _training_request_payload()
+
+    monkeypatch.setattr("treqs_cli.commands.requests.TreqsApiClient", FakeClient)
+    monkeypatch.chdir(work_repo)
+    runner = CliRunner()
+    env = {"TREQS_CONFIG_HOME": str(config_home)}
+
+    # A literal "--json" after a `--` separator is the positional request-id argument,
+    # not our global flag — the `--` must survive our own arg-scan and Click's own
+    # nested group re-parsing so it isn't misread as the flag or rejected as an option.
+    result = runner.invoke(
+        cli,
+        ["tr", "show", "--", "--json"],
+        env=env,
+        catch_exceptions=False,
+    )
+
+    assert result.exit_code == 0, result.output
+    # Plain-text (not JSON) output confirms --json was NOT parsed as our flag.
+    assert "ID: request-1" in result.output
+    assert calls == [
+        "/api/v1/user/projects/mnist/training-requests/--json",
+    ]
+
+
 def test_repo_local_commands_fail_clearly_outside_git_repo(tmp_path: Path) -> None:
     config_home = tmp_path / "config"
     commands = [
