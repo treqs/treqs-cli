@@ -123,6 +123,60 @@ class TrainingRequestListFilters(BaseModel):
     offset: int = 0
 
 
+class TrainingRequestUser(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
+    id: str
+    name: str | None = None
+    username: str | None = None
+    email: str | None = None
+
+
+class TrainingRequestEvent(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
+    id: str
+    type: str
+    subType: str | None = None
+    content: str | None = None
+    userId: str | None = None
+    user: TrainingRequestUser | None = None
+    createdAt: str | None = None
+    updatedAt: str | None = None
+
+
+class TrainingRequestAssignee(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
+    userId: str
+    user: TrainingRequestUser | None = None
+    assignedAt: str | None = None
+
+
+class TrainingRequestReviewRecord(BaseModel):
+    """One reviewer's decision, as embedded in a request's `reviews` list.
+
+    Distinct from `TrainingRequestReview`, which is the result shape of
+    submitting a review (`tr review approve/reject`).
+    """
+
+    model_config = ConfigDict(extra="allow")
+
+    userId: str
+    status: str
+    reviewer: TrainingRequestUser | None = None
+    reviewedAt: str | None = None
+
+
+class TrainingRequestCommentInput(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    content: str
+
+    def to_api_payload(self) -> dict[str, object]:
+        return {"content": self.content}
+
+
 class TrainingRequest(BaseModel):
     model_config = ConfigDict(extra="allow")
 
@@ -139,6 +193,9 @@ class TrainingRequest(BaseModel):
     lineagePublishedSessionHash: str | None = None
     createdAt: str | None = None
     updatedAt: str | None = None
+    events: tuple[TrainingRequestEvent, ...] = ()
+    assignees: tuple[TrainingRequestAssignee, ...] = ()
+    reviews: tuple[TrainingRequestReviewRecord, ...] = ()
 
 
 class TrainingRequestQueueResult(BaseModel):
@@ -175,6 +232,11 @@ class TrainingRequestReviewResult(BaseModel):
 
     review: TrainingRequestReview
     trainingRequest: TrainingRequest
+
+
+def comment_events(request: TrainingRequest) -> list[TrainingRequestEvent]:
+    """Comment entries from a request's `events` timeline, in creation order."""
+    return [event for event in request.events if event.type == "comment"]
 
 
 def training_request_rows(requests: Sequence[TrainingRequest]) -> list[dict[str, str]]:

@@ -47,6 +47,7 @@ REPO_BOUND = {
     "tr update",
     "tr open",
     "tr queue",
+    "tr comment",
     "tr review approve",
     "tr review reject",
     "jobs list",

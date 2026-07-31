@@ -349,13 +349,32 @@ Options:
   --help  Show this message and exit.
 
 Commands:
-  create  Create a training request in the repo-local project context.
-  list    List training requests for the repo-local project context.
-  open    Open a draft training request for review.
-  queue   Queue an open training request as a job.
-  review  Approve or reject an open training request.
-  show    Show one training request from the repo-local project context.
-  update  Update a training request in the repo-local project context.
+  comment  Post a comment on a training request.
+  create   Create a training request in the repo-local project context.
+  list     List training requests for the repo-local project context.
+  open     Open a draft training request for review.
+  queue    Queue an open training request as a job.
+  review   Approve or reject an open training request.
+  show     Show one training request from the repo-local project context.
+  update   Update a training request in the repo-local project context.
+```
+
+## `treqs tr comment`
+
+```
+Usage: treqs tr comment [OPTIONS] REQUEST_ID CONTENT
+
+  Post a comment on a training request.
+
+  REQUEST_ID is the training request ID shown by `treqs tr list`. CONTENT is the
+  comment text (quote it if it contains spaces). See existing comments with
+  `treqs tr show <request-id> --comments`.
+
+Options:
+  --help  Show this message and exit.
+
+  Examples:
+    treqs tr comment <request-id> "Looks good, approving."
 ```
 
 ## `treqs tr create`
@@ -516,11 +535,14 @@ Usage: treqs tr show [OPTIONS] REQUEST_ID
   REQUEST_ID is the training request ID shown by `treqs tr list`.
 
 Options:
-  --help  Show this message and exit.
+  --comments  Show only the comment thread instead of the request details.
+  --help      Show this message and exit.
 
   Examples:
     treqs tr show <request-id>
     treqs --json tr show <request-id>
+    treqs tr show <request-id> --comments
+    treqs --json tr show <request-id> --comments
 ```
 
 ## `treqs tr update`

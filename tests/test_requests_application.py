@@ -9,13 +9,16 @@ from pydantic import ValidationError
 
 from treqs_cli.application.requests.models import (
     TrainingRequest,
+    TrainingRequestCommentInput,
     TrainingRequestCreateInput,
+    TrainingRequestEvent,
     TrainingRequestListFilters,
     TrainingRequestOpenInput,
     TrainingRequestQueueResult,
     TrainingRequestReviewInput,
     TrainingRequestReviewResult,
     TrainingRequestUpdateInput,
+    comment_events,
     training_request_rows,
 )
 from treqs_cli.application.requests.service import TrainingRequestService
@@ -211,6 +214,45 @@ def test_response_dto_parses_lineage_publication_fields() -> None:
     assert unpublished.lineagePublishedSessionHash is None
 
 
+def test_comment_events_filters_comments_from_the_mixed_events_timeline() -> None:
+    request = TrainingRequest.model_validate(
+        {
+            "id": "request-1",
+            "title": "Train model",
+            "status": "open",
+            "events": [
+                {
+                    "id": "event-1",
+                    "type": "user_event",
+                    "subType": "created",
+                    "userId": "user-1",
+                },
+                {
+                    "id": "event-2",
+                    "type": "comment",
+                    "content": "Looks good, approving.",
+                    "userId": "user-1",
+                    "user": {"id": "user-1", "username": "jon", "name": "Jon"},
+                    "createdAt": "2026-07-31T20:05:00.000Z",
+                },
+                {
+                    "id": "event-3",
+                    "type": "user_event",
+                    "subType": "opened",
+                    "userId": "user-1",
+                },
+            ],
+        }
+    )
+
+    comments = comment_events(request)
+
+    assert [c.id for c in comments] == ["event-2"]
+    assert comments[0].content == "Looks good, approving."
+    assert comments[0].user is not None
+    assert comments[0].user.username == "jon"
+
+
 def test_training_request_service_builds_owner_scoped_paths() -> None:
     client = _FakeTrainingRequestClient()
     auth_state = AuthState(api_url="https://api.treqs.ai", access_token="access-token")
@@ -253,6 +295,9 @@ def test_training_request_service_builds_owner_scoped_paths() -> None:
         "request-1",
         TrainingRequestReviewInput(status="approved", content="Smoke profile looks good"),
     )
+    commented = service.add_comment(
+        "request-1", TrainingRequestCommentInput(content="Looks good, approving.")
+    )
 
     assert listed[0].id == "request-1"
     assert created.id == "request-2"
@@ -261,6 +306,7 @@ def test_training_request_service_builds_owner_scoped_paths() -> None:
     assert opened.status == "open"
     assert queued.jobId == "job-1"
     assert reviewed.review.status == "approved"
+    assert commented.content == "Looks good, approving."
     assert client.calls == [
         (
             "list",
@@ -304,6 +350,11 @@ def test_training_request_service_builds_owner_scoped_paths() -> None:
             "review",
             "/api/v1/user/orgs/acme/projects/mnist/training-requests/request-1/reviews",
             {"status": "approved", "content": "Smoke profile looks good"},
+        ),
+        (
+            "comment",
+            "/api/v1/user/orgs/acme/projects/mnist/training-requests/request-1/comments",
+            {"content": "Looks good, approving."},
         ),
     ]
 
@@ -426,4 +477,18 @@ class _FakeTrainingRequestClient:
                     "status": "open",
                 },
             }
+        )
+
+    def add_training_request_comment(
+        self,
+        _auth_state: AuthState,
+        path: str,
+        json_payload: dict[str, object],
+    ) -> TrainingRequestEvent:
+        self.calls.append(("comment", path, json_payload))
+        return TrainingRequestEvent(
+            id="comment-1",
+            type="comment",
+            content=str(json_payload["content"]),
+            userId="user-1",
         )

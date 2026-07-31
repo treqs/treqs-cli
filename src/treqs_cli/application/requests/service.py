@@ -8,7 +8,9 @@ from ...context import owner_path
 from ...models import AuthState, RepoContext
 from .models import (
     TrainingRequest,
+    TrainingRequestCommentInput,
     TrainingRequestCreateInput,
+    TrainingRequestEvent,
     TrainingRequestListFilters,
     TrainingRequestOpenInput,
     TrainingRequestQueueResult,
@@ -68,6 +70,13 @@ class TrainingRequestApi(Protocol):
         path: str,
         json_payload: dict[str, object],
     ) -> TrainingRequestReviewResult: ...
+
+    def add_training_request_comment(
+        self,
+        auth_state: AuthState,
+        path: str,
+        json_payload: dict[str, object],
+    ) -> TrainingRequestEvent: ...
 
 
 @dataclass(frozen=True)
@@ -131,6 +140,17 @@ class TrainingRequestService:
             self.auth_state,
             f"{training_request_path(self.repo_context, request_id)}/reviews",
             review_input.to_api_payload(),
+        )
+
+    def add_comment(
+        self,
+        request_id: str,
+        comment_input: TrainingRequestCommentInput,
+    ) -> TrainingRequestEvent:
+        return self.client.add_training_request_comment(
+            self.auth_state,
+            f"{training_request_path(self.repo_context, request_id)}/comments",
+            comment_input.to_api_payload(),
         )
 
 
