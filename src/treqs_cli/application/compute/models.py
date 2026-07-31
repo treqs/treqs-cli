@@ -149,6 +149,21 @@ class SecretInput(BaseModel):
         return {"name": self.name, "value": self.value}
 
 
+class SecretMetadata(BaseModel):
+    """Compute target secret metadata. The API never returns the secret value itself."""
+
+    model_config = ConfigDict(extra="allow")
+
+    id: str
+    name: str
+    createdAt: str | None = None
+    updatedAt: str | None = None
+    createdBy: str | None = None
+    updatedBy: str | None = None
+    createdByUsername: str | None = None
+    updatedByUsername: str | None = None
+
+
 class RegistrationCode(BaseModel):
     model_config = ConfigDict(extra="allow")
 
@@ -179,6 +194,19 @@ def parse_secret_assignment(assignment: str) -> SecretInput:
     if not value:
         raise ValueError(f"Secret {validated_name} requires a non-empty value.")
     return SecretInput(name=validated_name, value=value)
+
+
+def secret_rows(secrets: Sequence[SecretMetadata]) -> list[dict[str, str]]:
+    return [
+        {
+            "name": secret.name,
+            "createdAt": secret.createdAt or "",
+            "updatedAt": secret.updatedAt or "",
+            "createdBy": secret.createdByUsername or secret.createdBy or "",
+            "updatedBy": secret.updatedByUsername or secret.updatedBy or "",
+        }
+        for secret in secrets
+    ]
 
 
 def compute_target_rows(

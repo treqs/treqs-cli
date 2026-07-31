@@ -621,7 +621,52 @@ Options:
   --help  Show this message and exit.
 
 Commands:
-  set  Set one or more KEY=VALUE secrets on a compute target.
+  delete  Delete a secret from a compute target.
+  list    List secret names (and metadata) set on a compute target.
+  set     Set one or more KEY=VALUE secrets on a compute target.
+```
+
+## `treqs compute secrets delete`
+
+```
+Usage: treqs compute secrets delete [OPTIONS] NAME
+
+  Delete a secret from a compute target.
+
+  NAME is the secret's name, as shown by `treqs compute secrets list`. Any job
+  dispatched to this target after deletion will no longer receive this secret as
+  an environment variable.
+
+Options:
+  --target TEXT  Compute target ID or name.  [required]
+  --owner TEXT   Owner username or organization. Defaults to the repo's bound
+                 project owner, then your personal owner.
+  -y, --yes      Skip the delete confirmation prompt (for non-interactive use).
+  --help         Show this message and exit.
+
+  Examples:
+    treqs compute secrets delete --target gpu-box HF_TOKEN
+    treqs compute secrets delete --target gpu-box --yes HF_TOKEN
+```
+
+## `treqs compute secrets list`
+
+```
+Usage: treqs compute secrets list [OPTIONS]
+
+  List secret names (and metadata) set on a compute target.
+
+  Secret values are never returned by the API and are not shown here.
+
+Options:
+  --target TEXT  Compute target ID or name.  [required]
+  --owner TEXT   Owner username or organization. Defaults to the repo's bound
+                 project owner, then your personal owner.
+  --help         Show this message and exit.
+
+  Examples:
+    treqs compute secrets list --target gpu-box
+    treqs --json compute secrets list --target gpu-box --owner acme
 ```
 
 ## `treqs compute secrets set`

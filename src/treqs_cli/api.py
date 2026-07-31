@@ -6,7 +6,12 @@ from typing import Any, cast
 
 import httpx
 
-from .application.compute.models import AwsLaunchOptions, ComputeTarget, RegistrationCode
+from .application.compute.models import (
+    AwsLaunchOptions,
+    ComputeTarget,
+    RegistrationCode,
+    SecretMetadata,
+)
 from .application.jobs.models import (
     LineageRepublishResult,
     LogPollResult,
@@ -304,6 +309,25 @@ class TreqsApiClient:
         if payload.get("success") is not True:
             raise ApiError(_error_message(payload, None))
 
+    def list_compute_target_secrets(
+        self,
+        auth_state: AuthState,
+        path: str,
+    ) -> list[SecretMetadata]:
+        payload = self.request_json("GET", path, auth_state=auth_state)
+        return [SecretMetadata.model_validate(item) for item in _unwrap_list_data(payload)]
+
+    def delete_compute_target_secret(
+        self,
+        auth_state: AuthState,
+        path: str,
+    ) -> None:
+        # The API returns 204 No Content on success (no "success"/"data" envelope),
+        # which request_json's 204 short-circuit turns into {"success": True}.
+        payload = self.request_json("DELETE", path, auth_state=auth_state)
+        if payload.get("success") is not True:
+            raise ApiError(_error_message(payload, None))
+
     def create_registration_code(
         self,
         auth_state: AuthState,
@@ -405,6 +429,11 @@ class TreqsApiClient:
             )
         except httpx.HTTPError as exc:
             raise ApiError(f"Failed to connect to TReqs API: {exc}") from exc
+
+        if response.status_code == 204:
+            # No Content has no body to parse; treat it as an implicit success envelope
+            # so callers can use the same payload.get("success") check as everywhere else.
+            return {"success": True}
 
         payload = _response_payload(response)
         if response.status_code >= 400:

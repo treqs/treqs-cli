@@ -12,6 +12,7 @@ from ..application.compute.models import (
     ComputeTargetCreateInput,
     compute_target_rows,
     parse_secret_assignment,
+    secret_rows,
 )
 from ..application.compute.service import (
     ComputeTargetService,
@@ -461,6 +462,118 @@ def compute_secrets_set_command(
         raise ConfigError(
             f"Failed to set {len(failures)} of {len(secrets)} secrets on compute target {target}."
         )
+
+
+@compute_secrets_group.command(
+    "list",
+    epilog=examples(
+        "treqs compute secrets list --target gpu-box",
+        "treqs --json compute secrets list --target gpu-box --owner acme",
+    ),
+)
+@click.option("--target", "target", required=True, help="Compute target ID or name.")
+@owner_option
+@click.pass_obj
+def compute_secrets_list_command(
+    state: TreqsContext,
+    target: str,
+    owner: str | None,
+) -> None:
+    """List secret names (and metadata) set on a compute target.
+
+    Secret values are never returned by the API and are not shown here.
+    """
+    auth_state, access_context = load_access_context(state)
+    scope = resolve_owner_scope(state, access_context, owner)
+
+    with TreqsApiClient(auth_state.api_url) as client:
+        service = ComputeTargetService(client, auth_state, scope)
+        target_id = _resolve_target_id(service, target)
+        secrets = service.list_secrets(target_id)
+
+    if state.json_output:
+        emit_json(secrets)
+        return
+
+    click.echo(f"Secrets on compute target {target} ({len(secrets)}):")
+    render_table(
+        secret_rows(secrets),
+        [
+            ("name", "NAME"),
+            ("createdAt", "CREATED"),
+            ("updatedAt", "UPDATED"),
+            ("createdBy", "CREATED BY"),
+            ("updatedBy", "UPDATED BY"),
+        ],
+    )
+
+
+@compute_secrets_group.command(
+    "delete",
+    epilog=examples(
+        "treqs compute secrets delete --target gpu-box HF_TOKEN",
+        "treqs compute secrets delete --target gpu-box --yes HF_TOKEN",
+    ),
+)
+@click.option("--target", "target", required=True, help="Compute target ID or name.")
+@owner_option
+@click.option(
+    "--yes",
+    "-y",
+    is_flag=True,
+    help="Skip the delete confirmation prompt (for non-interactive use).",
+)
+@click.argument("name")
+@click.pass_obj
+def compute_secrets_delete_command(
+    state: TreqsContext,
+    target: str,
+    owner: str | None,
+    yes: bool,
+    name: str,
+) -> None:
+    """Delete a secret from a compute target.
+
+    NAME is the secret's name, as shown by `treqs compute secrets list`. Any
+    job dispatched to this target after deletion will no longer receive this
+    secret as an environment variable.
+    """
+    _confirm_secret_delete(state, target, name, yes)
+
+    auth_state, access_context = load_access_context(state)
+    scope = resolve_owner_scope(state, access_context, owner)
+
+    with TreqsApiClient(auth_state.api_url) as client:
+        service = ComputeTargetService(client, auth_state, scope)
+        target_id = _resolve_target_id(service, target)
+        service.delete_secret(target_id, name)
+
+    if state.json_output:
+        emit_json({"targetId": target_id, "deleted": name})
+        return
+
+    click.echo(f"Deleted secret {name} from compute target {target}.")
+
+
+def _confirm_secret_delete(state: TreqsContext, target: str, name: str, yes: bool) -> None:
+    """Guard against accidentally deleting a secret a job still depends on.
+
+    Needs explicit confirmation: interactively via a prompt, or --yes for
+    scripted/unattended use. In a non-interactive session without --yes,
+    fails loudly instead of hanging on a prompt nobody can answer.
+    """
+    if yes:
+        return
+    if not state.is_interactive:
+        raise ConfigError(
+            f"Deleting secret {name} from compute target {target}. "
+            "Re-run with --yes to confirm in a non-interactive session."
+        )
+    if not click.confirm(
+        f"This will delete secret {name} from compute target {target}. Continue?",
+        default=False,
+    ):
+        raise click.Abort()
 
 
 @compute_targets_group.group("registration-code")

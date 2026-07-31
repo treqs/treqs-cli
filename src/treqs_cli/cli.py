@@ -103,6 +103,28 @@ class LazyGroup(click.Group):
                 name,
             )
 
+    def parse_args(self, ctx: click.Context, args: list[str]) -> list[str]:
+        # --json is declared on this root group, so plain Click only recognizes it
+        # before the subcommand name (`treqs --json projects list`). Strip it from
+        # anywhere in the invocation up front so `treqs projects list --json` (and
+        # any nesting depth, e.g. `compute targets list --json`) works too. A `--`
+        # separator still protects genuine positional args from being scanned.
+        json_requested = False
+        filtered: list[str] = []
+        seen_separator = False
+        for token in args:
+            if not seen_separator and token == "--":
+                seen_separator = True
+            elif not seen_separator and token == "--json":
+                json_requested = True
+                continue
+            filtered.append(token)
+
+        result = super().parse_args(ctx, filtered)
+        if json_requested:
+            ctx.params["json_output"] = True
+        return result
+
     def list_commands(self, ctx: click.Context) -> list[str]:
         return sorted(super().list_commands(ctx))
 
