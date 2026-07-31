@@ -21,6 +21,7 @@ from .application.jobs.models import (
 from .application.projects.models import Project
 from .application.requests.models import (
     TrainingRequest,
+    TrainingRequestEvent,
     TrainingRequestQueueResult,
     TrainingRequestReviewResult,
 )
@@ -193,8 +194,27 @@ class TreqsApiClient:
         auth_state: AuthState,
         path: str,
     ) -> TrainingRequest:
-        payload = self.request_json("GET", path, auth_state=auth_state)
+        payload = self.request_json(
+            "GET",
+            path,
+            auth_state=auth_state,
+            params={"include": "assignees,reviews"},
+        )
         return TrainingRequest.model_validate(_unwrap_data(payload))
+
+    def add_training_request_comment(
+        self,
+        auth_state: AuthState,
+        path: str,
+        json_payload: dict[str, object],
+    ) -> TrainingRequestEvent:
+        payload = self.request_json(
+            "POST",
+            path,
+            auth_state=auth_state,
+            json_payload=json_payload,
+        )
+        return TrainingRequestEvent.model_validate(_unwrap_data(payload))
 
     def open_training_request(
         self,

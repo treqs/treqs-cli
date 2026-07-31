@@ -247,6 +247,19 @@ def test_training_request_methods_use_project_paths_and_payloads() -> None:
                     ],
                 },
             )
+        if request.method == "POST" and request.url.path.endswith("/comments"):
+            return httpx.Response(
+                201,
+                json={
+                    "success": True,
+                    "data": {
+                        "id": "comment-1",
+                        "type": "comment",
+                        "content": (body or {}).get("content"),
+                        "userId": "user-1",
+                    },
+                },
+            )
         if request.method == "POST" and request.url.path.endswith("/queue"):
             return httpx.Response(
                 200,
@@ -312,6 +325,11 @@ def test_training_request_methods_use_project_paths_and_payloads() -> None:
         auth_state,
         "/api/v1/user/projects/mnist/training-requests/request-1/queue",
     )
+    commented = client.add_training_request_comment(
+        auth_state,
+        "/api/v1/user/projects/mnist/training-requests/request-1/comments",
+        {"content": "Looks good, approving."},
+    )
 
     assert listed[0].id == "request-1"
     assert created.id == "request-1"
@@ -319,6 +337,7 @@ def test_training_request_methods_use_project_paths_and_payloads() -> None:
     assert fetched.id == "request-1"
     assert opened.id == "request-1"
     assert queued.jobId == "job-1"
+    assert commented.content == "Looks good, approving."
     assert seen_requests == [
         (
             "GET",
@@ -341,7 +360,7 @@ def test_training_request_methods_use_project_paths_and_payloads() -> None:
         (
             "GET",
             "/api/v1/user/projects/mnist/training-requests/request-1",
-            {},
+            {"include": "assignees,reviews"},
             None,
         ),
         (
@@ -358,6 +377,12 @@ def test_training_request_methods_use_project_paths_and_payloads() -> None:
             "/api/v1/user/projects/mnist/training-requests/request-1/queue",
             {},
             None,
+        ),
+        (
+            "POST",
+            "/api/v1/user/projects/mnist/training-requests/request-1/comments",
+            {},
+            {"content": "Looks good, approving."},
         ),
     ]
 

@@ -9,12 +9,18 @@ from ..api import TreqsApiClient
 from ..application.compute.service import ComputeTargetService, resolve_compute_target_id
 from ..application.requests.models import (
     TRAINING_REQUEST_STATUSES,
+    TrainingRequestAssignee,
+    TrainingRequestCommentInput,
     TrainingRequestCreateInput,
+    TrainingRequestEvent,
     TrainingRequestListFilters,
     TrainingRequestOpenInput,
     TrainingRequestReviewInput,
+    TrainingRequestReviewRecord,
     TrainingRequestStatus,
     TrainingRequestUpdateInput,
+    TrainingRequestUser,
+    comment_events,
     training_request_rows,
 )
 from ..application.requests.service import TrainingRequestService
@@ -186,11 +192,19 @@ def requests_create_command(
     epilog=examples(
         "treqs tr show <request-id>",
         "treqs --json tr show <request-id>",
+        "treqs tr show <request-id> --comments",
+        "treqs --json tr show <request-id> --comments",
     ),
 )
 @click.argument("request_id")
+@click.option(
+    "--comments",
+    "show_comments",
+    is_flag=True,
+    help="Show only the comment thread instead of the request details.",
+)
 @click.pass_obj
-def requests_show_command(state: TreqsContext, request_id: str) -> None:
+def requests_show_command(state: TreqsContext, request_id: str, show_comments: bool) -> None:
     """Show one training request from the repo-local project context.
 
     REQUEST_ID is the training request ID shown by `treqs tr list`.
@@ -198,6 +212,14 @@ def requests_show_command(state: TreqsContext, request_id: str) -> None:
     auth_state, repo_context = load_project_api_context(state)
     with TreqsApiClient(auth_state.api_url) as client:
         request = TrainingRequestService(client, auth_state, repo_context).get(request_id)
+
+    if show_comments:
+        comments = comment_events(request)
+        if state.json_output:
+            emit_json(comments)
+            return
+        _print_comments(request_id, comments)
+        return
 
     if state.json_output:
         emit_json(request)
@@ -225,6 +247,41 @@ def requests_show_command(state: TreqsContext, request_id: str) -> None:
     if request.description:
         click.echo("")
         click.echo(request.description)
+    reviewer_lines = _reviewer_lines(request.assignees, request.reviews)
+    if reviewer_lines:
+        click.echo("")
+        click.echo("Reviewers:")
+        for line in reviewer_lines:
+            click.echo(f"  {line}")
+
+
+@requests_group.command(
+    "comment",
+    epilog=examples(
+        'treqs tr comment <request-id> "Looks good, approving."',
+    ),
+)
+@click.argument("request_id")
+@click.argument("content")
+@click.pass_obj
+def requests_comment_command(state: TreqsContext, request_id: str, content: str) -> None:
+    """Post a comment on a training request.
+
+    REQUEST_ID is the training request ID shown by `treqs tr list`. CONTENT
+    is the comment text (quote it if it contains spaces). See existing
+    comments with `treqs tr show <request-id> --comments`.
+    """
+    auth_state, repo_context = load_project_api_context(state)
+    with TreqsApiClient(auth_state.api_url) as client:
+        comment = TrainingRequestService(client, auth_state, repo_context).add_comment(
+            request_id, TrainingRequestCommentInput(content=content)
+        )
+
+    if state.json_output:
+        emit_json(comment)
+        return
+
+    click.echo(f"Commented on {request_id}.")
 
 
 @requests_group.command(
@@ -640,3 +697,37 @@ def _compute_target_id(compute_selection: dict[str, object] | None) -> str | Non
         return None
     target_id = compute_selection.get("targetId")
     return target_id if isinstance(target_id, str) else None
+
+
+def _user_label(user: TrainingRequestUser | None, fallback_id: str) -> str:
+    if user is None:
+        return fallback_id
+    return user.username or user.name or user.id
+
+
+def _reviewer_lines(
+    assignees: tuple[TrainingRequestAssignee, ...],
+    reviews: tuple[TrainingRequestReviewRecord, ...],
+) -> list[str]:
+    """One line per assigned reviewer: their status, or 'pending' if undecided.
+
+    Mirrors the dashboard's per-reviewer display (RequestReviewers.vue): no
+    aggregate count, just each assignee annotated with their own decision.
+    """
+    status_by_user = {review.userId: review.status for review in reviews}
+    lines = []
+    for assignee in assignees:
+        status = status_by_user.get(assignee.userId, "pending")
+        lines.append(f"{_user_label(assignee.user, assignee.userId)}  {status}")
+    return lines
+
+
+def _print_comments(request_id: str, comments: list[TrainingRequestEvent]) -> None:
+    click.echo(f"Comments on {request_id} ({len(comments)}):")
+    for comment in comments:
+        click.echo("")
+        author = _user_label(comment.user, comment.userId or "unknown")
+        timestamp = comment.createdAt or ""
+        click.echo(f"{author} · {timestamp}")
+        for line in (comment.content or "").splitlines() or [""]:
+            click.echo(f"  {line}")

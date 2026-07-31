@@ -11,7 +11,11 @@ from click.testing import CliRunner
 
 from treqs_cli.application.compute.models import ComputeTarget
 from treqs_cli.application.jobs.models import ProjectJobs, TrainingJob
-from treqs_cli.application.requests.models import TrainingRequest, TrainingRequestQueueResult
+from treqs_cli.application.requests.models import (
+    TrainingRequest,
+    TrainingRequestEvent,
+    TrainingRequestQueueResult,
+)
 from treqs_cli.cli import cli
 from treqs_cli.commands.shared import auth_state_for_request
 from treqs_cli.config import AuthStore, RepoContextStore
@@ -609,6 +613,232 @@ def test_tr_show_prints_lineage_publication_when_present(
     assert shown.exit_code == 0, shown.output
     assert "Session: abc123" in shown.output
     assert "Lineage URL: https://glaas.ai/dag/abc123" in shown.output
+
+
+def test_tr_show_prints_reviewers_with_pending_and_decided_status(
+    monkeypatch: Any,
+    tmp_path: Path,
+) -> None:
+    config_home = tmp_path / "config"
+    work_repo = tmp_path / "repo"
+    work_repo.mkdir()
+    (work_repo / ".git").mkdir()
+    AuthStore(config_home / "auth.json").save(
+        AuthState(api_url="https://api.treqs.ai", access_token="access-token")
+    )
+    RepoContextStore(work_repo / ".treqs" / "config.toml").save(
+        RepoContext(
+            api_url="https://api.treqs.ai",
+            owner_id="owner-1",
+            owner_type="user",
+            owner_username="trevor",
+            owner_display_name="Trevor",
+            project_id="project-1",
+            project_slug="mnist",
+            project_name="MNIST",
+            current_username="trevor",
+        )
+    )
+
+    class FakeClient:
+        def __init__(self, api_url: str) -> None:
+            self.api_url = api_url
+
+        def __enter__(self) -> FakeClient:
+            return self
+
+        def __exit__(self, *_exc: object) -> None:
+            return None
+
+        def get_training_request(
+            self,
+            auth_state: AuthState,
+            path: str,
+        ) -> TrainingRequest:
+            return TrainingRequest.model_validate(
+                {
+                    "id": "request-1",
+                    "title": "Train model",
+                    "status": "open",
+                    "projectSlug": "mnist",
+                    "assignees": [
+                        {"userId": "user-jon", "user": {"id": "user-jon", "username": "jon"}},
+                        {
+                            "userId": "user-trevor",
+                            "user": {"id": "user-trevor", "username": "trevor"},
+                        },
+                    ],
+                    "reviews": [{"userId": "user-jon", "status": "approved"}],
+                }
+            )
+
+    monkeypatch.setattr("treqs_cli.commands.requests.TreqsApiClient", FakeClient)
+    monkeypatch.chdir(work_repo)
+    runner = CliRunner()
+    env = {"TREQS_CONFIG_HOME": str(config_home)}
+
+    shown = runner.invoke(cli, ["tr", "show", "request-1"], env=env, catch_exceptions=False)
+
+    assert shown.exit_code == 0, shown.output
+    assert "Reviewers:" in shown.output
+    assert "jon  approved" in shown.output
+    assert "trevor  pending" in shown.output
+
+
+def test_tr_show_comments_flag_filters_events_in_human_and_json_mode(
+    monkeypatch: Any,
+    tmp_path: Path,
+) -> None:
+    config_home = tmp_path / "config"
+    work_repo = tmp_path / "repo"
+    work_repo.mkdir()
+    (work_repo / ".git").mkdir()
+    AuthStore(config_home / "auth.json").save(
+        AuthState(api_url="https://api.treqs.ai", access_token="access-token")
+    )
+    RepoContextStore(work_repo / ".treqs" / "config.toml").save(
+        RepoContext(
+            api_url="https://api.treqs.ai",
+            owner_id="owner-1",
+            owner_type="user",
+            owner_username="trevor",
+            owner_display_name="Trevor",
+            project_id="project-1",
+            project_slug="mnist",
+            project_name="MNIST",
+            current_username="trevor",
+        )
+    )
+
+    class FakeClient:
+        def __init__(self, api_url: str) -> None:
+            self.api_url = api_url
+
+        def __enter__(self) -> FakeClient:
+            return self
+
+        def __exit__(self, *_exc: object) -> None:
+            return None
+
+        def get_training_request(
+            self,
+            auth_state: AuthState,
+            path: str,
+        ) -> TrainingRequest:
+            return TrainingRequest.model_validate(
+                {
+                    "id": "request-1",
+                    "title": "Train model",
+                    "status": "open",
+                    "projectSlug": "mnist",
+                    "events": [
+                        {"id": "event-1", "type": "user_event", "subType": "created"},
+                        {
+                            "id": "event-2",
+                            "type": "comment",
+                            "content": "Looks good, approving.",
+                            "user": {"id": "user-jon", "username": "jon"},
+                            "createdAt": "2026-07-31T20:05:00.000Z",
+                        },
+                    ],
+                }
+            )
+
+    monkeypatch.setattr("treqs_cli.commands.requests.TreqsApiClient", FakeClient)
+    monkeypatch.chdir(work_repo)
+    runner = CliRunner()
+    env = {"TREQS_CONFIG_HOME": str(config_home)}
+
+    human = runner.invoke(
+        cli, ["tr", "show", "request-1", "--comments"], env=env, catch_exceptions=False
+    )
+    as_json = runner.invoke(
+        cli, ["tr", "show", "request-1", "--comments", "--json"], env=env, catch_exceptions=False
+    )
+
+    assert human.exit_code == 0, human.output
+    assert "Comments on request-1 (1):" in human.output
+    assert "jon ·" in human.output
+    assert "Looks good, approving." in human.output
+    assert "created" not in human.output
+
+    assert as_json.exit_code == 0, as_json.output
+    comments = json.loads(as_json.output)
+    assert len(comments) == 1
+    assert comments[0]["content"] == "Looks good, approving."
+
+
+def test_tr_comment_posts_and_prints_confirmation(
+    monkeypatch: Any,
+    tmp_path: Path,
+) -> None:
+    config_home = tmp_path / "config"
+    work_repo = tmp_path / "repo"
+    work_repo.mkdir()
+    (work_repo / ".git").mkdir()
+    AuthStore(config_home / "auth.json").save(
+        AuthState(api_url="https://api.treqs.ai", access_token="access-token")
+    )
+    RepoContextStore(work_repo / ".treqs" / "config.toml").save(
+        RepoContext(
+            api_url="https://api.treqs.ai",
+            owner_id="owner-1",
+            owner_type="user",
+            owner_username="trevor",
+            owner_display_name="Trevor",
+            project_id="project-1",
+            project_slug="mnist",
+            project_name="MNIST",
+            current_username="trevor",
+        )
+    )
+
+    calls: list[tuple[str, dict[str, object]]] = []
+
+    class FakeClient:
+        def __init__(self, api_url: str) -> None:
+            self.api_url = api_url
+
+        def __enter__(self) -> FakeClient:
+            return self
+
+        def __exit__(self, *_exc: object) -> None:
+            return None
+
+        def add_training_request_comment(
+            self,
+            auth_state: AuthState,
+            path: str,
+            json_payload: dict[str, object],
+        ) -> TrainingRequestEvent:
+            calls.append((path, json_payload))
+            return TrainingRequestEvent(
+                id="comment-1",
+                type="comment",
+                content=str(json_payload["content"]),
+                userId="user-1",
+            )
+
+    monkeypatch.setattr("treqs_cli.commands.requests.TreqsApiClient", FakeClient)
+    monkeypatch.chdir(work_repo)
+    runner = CliRunner()
+    env = {"TREQS_CONFIG_HOME": str(config_home)}
+
+    result = runner.invoke(
+        cli,
+        ["tr", "comment", "request-1", "Looks good, approving."],
+        env=env,
+        catch_exceptions=False,
+    )
+
+    assert result.exit_code == 0, result.output
+    assert "Commented on request-1." in result.output
+    assert calls == [
+        (
+            "/api/v1/user/projects/mnist/training-requests/request-1/comments",
+            {"content": "Looks good, approving."},
+        )
+    ]
 
 
 def test_compute_and_jobs_commands_use_repo_project_context(
