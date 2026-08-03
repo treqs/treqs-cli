@@ -4,18 +4,20 @@ import json
 from pathlib import Path
 from typing import Any, cast
 
+import pytest
 from click.testing import CliRunner
 
 from treqs_cli.application.compute.models import ComputeTarget
-from treqs_cli.application.jobs.models import TrainingJob
+from treqs_cli.application.jobs.models import JobUpdates, JobUpdateSnapshot, TrainingJob
 from treqs_cli.application.requests.models import (
     TrainingRequest,
     TrainingRequestCreateInput,
     TrainingRequestQueueResult,
 )
-from treqs_cli.commands.run import run_command
+from treqs_cli.commands.run import run_command, validate_run_compute_target
 from treqs_cli.config import AuthStore, RepoContextStore
 from treqs_cli.context import TreqsContext
+from treqs_cli.errors import ConfigError
 from treqs_cli.models import AuthState, RepoContext
 
 
@@ -90,8 +92,9 @@ def test_run_chains_immutable_request_open_queue_and_job_lookup(
                 ComputeTarget(
                     id="target-1",
                     name="eks-training-dev",
-                    type="dedicated",
-                    agent={"status": "online"},
+                    type="runpod",
+                    kind="on-demand",
+                    agent=None,
                 )
             ]
 
@@ -136,15 +139,27 @@ def test_run_chains_immutable_request_open_queue_and_job_lookup(
             calls.append(("job", job_id))
             return TrainingJob(
                 id=job_id,
-                status="QUEUED",
+                status="COMPLETED",
                 lineagePublicationMode="private",
             )
+
+    def fake_watch_job(*_args: object, **_kwargs: object) -> JobUpdates:
+        calls.append(("watch", "job-1"))
+        return JobUpdates(
+            snapshot=JobUpdateSnapshot(
+                jobStatus="COMPLETED",
+                phase="terminal",
+                message="Job completed",
+            ),
+            terminal=True,
+        )
 
     monkeypatch.setattr("treqs_cli.commands.run.GitRepository", FakeRepository)
     monkeypatch.setattr("treqs_cli.commands.run.TreqsApiClient", FakeClient)
     monkeypatch.setattr("treqs_cli.commands.run.ComputeTargetService", FakeComputeService)
     monkeypatch.setattr("treqs_cli.commands.run.TrainingRequestService", FakeRequestService)
     monkeypatch.setattr("treqs_cli.commands.run.JobService", FakeJobService)
+    monkeypatch.setattr("treqs_cli.commands.run.watch_job", fake_watch_job)
     monkeypatch.setattr(
         "treqs_cli.commands.run.load_project_api_context",
         lambda _state: (auth_state, repo_context),
@@ -162,6 +177,7 @@ def test_run_chains_immutable_request_open_queue_and_job_lookup(
             "--lineage",
             "private",
             "--yes",
+            "--follow",
         ],
         obj=state,
         catch_exceptions=False,
@@ -169,7 +185,7 @@ def test_run_chains_immutable_request_open_queue_and_job_lookup(
 
     assert result.exit_code == 0, result.output
     payload = json.loads(result.output)
-    assert payload["status"] == "queued"
+    assert payload["status"] == "completed"
     assert payload["sourceCommit"] == commit
     assert payload["workflowSnapshotId"] == "snapshot-1"
     assert payload["job"]["id"] == "job-1"
@@ -185,3 +201,44 @@ def test_run_chains_immutable_request_open_queue_and_job_lookup(
     assert create_input.lineage_mode == "private"
     assert ("targets", True) in calls
     assert ("queue", "request-1") in calls
+    assert ("watch", "job-1") in calls
+
+
+def test_run_compute_readiness_allows_dormant_auto_provisioned_target() -> None:
+    validate_run_compute_target(
+        ComputeTarget(
+            id="target-1",
+            name="RunPod",
+            type="runpod",
+            kind="on-demand",
+            startupBehavior="auto-provision",
+            agent=None,
+        )
+    )
+
+
+def test_run_compute_readiness_rejects_unregistered_dedicated_target() -> None:
+    with pytest.raises(ConfigError, match="no registered agent"):
+        validate_run_compute_target(
+            ComputeTarget(
+                id="target-1",
+                name="GPU box",
+                type="dedicated",
+                kind="dedicated",
+                agent=None,
+            )
+        )
+
+
+def test_run_compute_readiness_rejects_manual_start_target() -> None:
+    with pytest.raises(ConfigError, match="only-if-running"):
+        validate_run_compute_target(
+            ComputeTarget(
+                id="target-1",
+                name="Manual GPU",
+                type="runpod",
+                kind="on-demand",
+                startupBehavior="only-if-running",
+                agent=None,
+            )
+        )

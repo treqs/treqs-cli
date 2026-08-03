@@ -24,6 +24,22 @@ JOB_STATUSES: tuple[JobStatus, ...] = (
     "CANCELLED",
 )
 
+JobUpdatePhase = Literal[
+    "queued",
+    "awaiting_compute_approval",
+    "provisioning",
+    "waiting_for_agent",
+    "assigned",
+    "acquired",
+    "preparing",
+    "running_task",
+    "finalizing",
+    "publishing_lineage",
+    "blocked",
+    "terminal",
+]
+JobLifecycleSeverity = Literal["info", "warning", "error"]
+
 
 class JobTrainingRequest(BaseModel):
     model_config = ConfigDict(extra="allow")
@@ -65,6 +81,56 @@ class ProjectJobs(BaseModel):
 
     def all_jobs(self) -> list[TrainingJob]:
         return [*self.activeJobs, *self.queuedJobs, *self.finishedJobs]
+
+
+class JobUpdateCompute(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
+    targetId: str
+    targetName: str | None = None
+    instanceId: str | None = None
+    status: str | None = None
+    attempt: int | None = None
+
+
+class JobUpdateTask(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
+    id: str
+    name: str
+    status: str
+
+
+class JobUpdateSnapshot(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
+    jobStatus: JobStatus
+    phase: JobUpdatePhase
+    message: str
+    actionRequired: str | None = None
+    compute: JobUpdateCompute | None = None
+    task: JobUpdateTask | None = None
+    lineagePublicationStatus: str | None = None
+
+
+class JobLifecycleEvent(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
+    id: str
+    kind: str
+    occurredAt: str
+    severity: JobLifecycleSeverity
+    message: str
+    attributes: dict[str, str | int | float | bool] = Field(default_factory=dict)
+
+
+class JobUpdates(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
+    snapshot: JobUpdateSnapshot
+    events: list[JobLifecycleEvent] = Field(default_factory=list)
+    nextCursor: str | None = None
+    terminal: bool = False
 
 
 class LineageRepublishResult(BaseModel):

@@ -857,6 +857,7 @@ Commands:
   republish-lineage  Re-publish a job's stored lineage package to GLaaS.
   show               Show one job from the repo-local project context.
   wait               Wait for a job to complete, fail, or be cancelled.
+  watch              Stream lifecycle status and workload logs until a job...
 ```
 
 ## `treqs jobs cancel`
@@ -982,6 +983,33 @@ Options:
   Examples:
     treqs jobs wait <job-id>
     treqs jobs wait <job-id> --timeout 3600
+```
+
+## `treqs jobs watch`
+
+```
+Usage: treqs jobs watch [OPTIONS] JOB_ID
+
+  Stream lifecycle status and workload logs until a job finishes.
+
+  JOB_ID is the job ID shown by `treqs jobs list` or printed by `treqs tr
+  queue`.
+
+  Lifecycle updates are written to stderr. Workload logs remain on stdout.
+  Ctrl-C detaches without cancelling the job.
+
+Options:
+  --timeout FLOAT RANGE           Maximum seconds to watch before detaching.
+                                  [default: 7200.0; x>=1.0]
+  --poll-timeout-ms INTEGER RANGE
+                                  Server-side lifecycle long-poll timeout per
+                                  request.  [default: 2000; 1000<=x<=30000]
+  --help                          Show this message and exit.
+
+  Examples:
+    treqs jobs watch <job-id>
+    treqs jobs watch <job-id> --timeout 3600
+    treqs --json jobs watch <job-id>
 ```
 
 ## `treqs logout`

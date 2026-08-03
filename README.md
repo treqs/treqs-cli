@@ -150,9 +150,15 @@ Inspect jobs, which are created by `treqs tr queue`.
 ```bash
 treqs jobs list --status QUEUED
 treqs jobs show <job-id>
+treqs jobs watch <job-id>
 treqs jobs logs <job-id> --follow
 treqs jobs republish-lineage <job-id>
 ```
+
+`jobs watch` follows compute provisioning, agent acquisition, execution, and
+terminal status while also streaming workload logs. Lifecycle status is sent
+to stderr and workload output remains on stdout. Ctrl-C detaches without
+cancelling the job; use `treqs jobs cancel <job-id>` to cancel explicitly.
 
 ### API tokens
 

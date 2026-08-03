@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import datetime, timezone
 from typing import cast
 
 import click
@@ -9,8 +10,19 @@ from ..application.compute.service import (
     ComputeTargetService,
     resolve_compute_target_id,
 )
-from ..application.jobs.models import JOB_STATUSES, JobStatus, job_rows
-from ..application.jobs.service import JobLogService, JobService, wait_for_terminal_job
+from ..application.jobs.models import (
+    JOB_STATUSES,
+    JobStatus,
+    JobUpdates,
+    JobUpdateSnapshot,
+    job_rows,
+)
+from ..application.jobs.service import (
+    JobLogService,
+    JobService,
+    wait_for_terminal_job,
+    watch_job,
+)
 from ..context import OwnerScope, TreqsContext
 from ..errors import ConfigError
 from ..help_text import examples
@@ -186,6 +198,94 @@ def jobs_wait_command(
 
 
 @jobs_group.command(
+    "watch",
+    epilog=examples(
+        "treqs jobs watch <job-id>",
+        "treqs jobs watch <job-id> --timeout 3600",
+        "treqs --json jobs watch <job-id>",
+    ),
+)
+@click.argument("job_id")
+@click.option(
+    "--timeout",
+    "timeout_seconds",
+    type=click.FloatRange(min=1.0),
+    default=7200.0,
+    show_default=True,
+    help="Maximum seconds to watch before detaching.",
+)
+@click.option(
+    "--poll-timeout-ms",
+    type=click.IntRange(1000, 30000),
+    default=2000,
+    show_default=True,
+    help="Server-side lifecycle long-poll timeout per request.",
+)
+@click.pass_obj
+def jobs_watch_command(
+    state: TreqsContext,
+    job_id: str,
+    timeout_seconds: float,
+    poll_timeout_ms: int,
+) -> None:
+    """Stream lifecycle status and workload logs until a job finishes.
+
+    JOB_ID is the job ID shown by `treqs jobs list` or printed by
+    `treqs tr queue`.
+
+    Lifecycle updates are written to stderr. Workload logs remain on stdout.
+    Ctrl-C detaches without cancelling the job.
+    """
+    auth_state, repo_context = load_project_api_context(state)
+    renderer = JobLifecycleRenderer()
+
+    with TreqsApiClient(auth_state.api_url) as client:
+        job_service = JobService(client, auth_state, repo_context)
+        initial_job = job_service.get(job_id)
+        log_service = JobLogService(client, auth_state, repo_context)
+        log_cursor = 0
+        logs_pending = bool(initial_job.computeTargetId) and not state.json_output
+
+        def poll_logs(timeout_ms: int = 1000) -> None:
+            nonlocal log_cursor, logs_pending
+            if not logs_pending or not initial_job.computeTargetId:
+                return
+            log_cursor, logs_pending = poll_job_logs_once(
+                log_service,
+                initial_job.computeTargetId,
+                job_id,
+                cursor=log_cursor,
+                timeout_ms=timeout_ms,
+            )
+
+        try:
+            updates = watch_job(
+                job_service,
+                job_id,
+                timeout_seconds=timeout_seconds,
+                poll_timeout_ms=poll_timeout_ms,
+                on_update=None if state.json_output else renderer.render_update,
+                on_heartbeat=None if state.json_output else renderer.render_heartbeat,
+                on_poll=None if state.json_output else poll_logs,
+            )
+            while updates.terminal and logs_pending:
+                poll_logs(30000)
+        except KeyboardInterrupt:
+            render_detached(job_id)
+            return
+        except TimeoutError as exc:
+            raise ConfigError(str(exc)) from exc
+
+    if state.json_output:
+        emit_json(updates)
+
+    if updates.snapshot.jobStatus != "COMPLETED":
+        if updates.snapshot.actionRequired:
+            raise ConfigError(f"Job {job_id} requires action: {updates.snapshot.actionRequired}")
+        raise ConfigError(f"Job {job_id} finished with status {updates.snapshot.jobStatus}.")
+
+
+@jobs_group.command(
     "republish-lineage",
     epilog=examples(
         "treqs jobs republish-lineage <job-id>",
@@ -307,17 +407,123 @@ def follow_job_logs(
     """Render paged job logs and optionally follow them to completion."""
     cursor = 0
     while True:
-        result = log_service.poll(
+        cursor, has_more = poll_job_logs_once(
+            log_service,
             target_id,
             job_id,
-            from_sequence=cursor,
+            cursor=cursor,
             timeout_ms=poll_timeout_ms,
         )
-        for chunk in result.chunks:
-            click.echo(chunk.content, nl=False)
-        cursor = result.nextSequence
-        if not result.hasMore or not follow:
+        if not has_more or not follow:
             break
+
+
+def poll_job_logs_once(
+    log_service: JobLogService,
+    target_id: str,
+    job_id: str,
+    *,
+    cursor: int,
+    timeout_ms: int,
+) -> tuple[int, bool]:
+    """Render one workload-log poll and return its next cursor and continuation state."""
+    result = log_service.poll(
+        target_id,
+        job_id,
+        from_sequence=cursor,
+        timeout_ms=timeout_ms,
+    )
+    for chunk in result.chunks:
+        click.echo(chunk.content, nl=False)
+    return result.nextSequence, result.hasMore
+
+
+class JobLifecycleRenderer:
+    def __init__(self) -> None:
+        self._last_phase: str | None = None
+        self._last_action: str | None = None
+
+    def render_update(self, update: JobUpdates) -> None:
+        rendered_messages: set[str] = set()
+        for event in update.events:
+            rendered_messages.add(event.message)
+            _echo_lifecycle(
+                _event_time(event.occurredAt),
+                _event_label(event.kind),
+                event.message,
+            )
+
+        snapshot = update.snapshot
+        if snapshot.phase != self._last_phase and snapshot.message not in rendered_messages:
+            _echo_lifecycle(_now_time(), snapshot.phase, snapshot.message)
+        if snapshot.actionRequired and snapshot.actionRequired != self._last_action:
+            _echo_lifecycle(_now_time(), "action required", snapshot.actionRequired)
+
+        self._last_phase = snapshot.phase
+        self._last_action = snapshot.actionRequired
+
+    def render_heartbeat(self, snapshot: JobUpdateSnapshot) -> None:
+        _echo_lifecycle(_now_time(), snapshot.phase, f"Still waiting — {snapshot.message}")
+
+
+def _echo_lifecycle(timestamp: str, label: str, message: str) -> None:
+    click.echo(f"{timestamp}  {label:<18} {message}", err=True)
+
+
+def _event_time(value: str) -> str:
+    try:
+        return datetime.fromisoformat(value.replace("Z", "+00:00")).strftime("%H:%M:%S")
+    except ValueError:
+        return _now_time()
+
+
+def _now_time() -> str:
+    return datetime.now(timezone.utc).strftime("%H:%M:%S")
+
+
+def _event_label(kind: str) -> str:
+    labels = {
+        "job.queued": "queued",
+        "compute.approval_required": "approval",
+        "compute.provisioning_started": "provisioning",
+        "compute.provider_accepted": "booting",
+        "compute.provisioning_failed": "blocked",
+        "compute.waiting_for_agent": "waiting for agent",
+        "compute.agent_ready": "ready",
+        "job.assigned": "assigned",
+        "job.acquired": "acquired",
+        "job.started": "running",
+        "execution.repository_preparing": "repository",
+        "execution.repository_ready": "repository",
+        "execution.environment_preparing": "environment",
+        "execution.environment_ready": "environment",
+        "task.started": "task",
+        "task.completed": "task",
+        "task.failed": "task failed",
+        "job.finalizing": "finalizing",
+        "lineage.export_started": "lineage export",
+        "lineage.export_completed": "lineage export",
+        "lineage.upload_started": "lineage upload",
+        "lineage.upload_completed": "lineage upload",
+        "lineage.upload_failed": "lineage failed",
+        "lineage.publication_started": "publishing",
+        "lineage.publication_completed": "published",
+        "lineage.publication_failed": "publish failed",
+        "job.completed": "completed",
+        "job.failed": "failed",
+        "job.cancelled": "cancelled",
+    }
+    return labels.get(kind, kind)
+
+
+def render_local_status(label: str, message: str) -> None:
+    _echo_lifecycle(_now_time(), label, message)
+
+
+def render_detached(job_id: str) -> None:
+    click.echo(f"Detached from job {job_id}; the job is still running.", err=True)
+    click.echo(f"Reattach: treqs jobs watch {job_id}", err=True)
+    click.echo(f"Cancel:   treqs jobs cancel {job_id}", err=True)
 
 
 def _resolve_job_target_id(

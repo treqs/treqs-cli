@@ -3,8 +3,9 @@ from __future__ import annotations
 import click
 
 from ..api import TreqsApiClient
+from ..application.compute.models import ComputeTarget
 from ..application.compute.service import ComputeTargetService, resolve_compute_target_id
-from ..application.jobs.service import JobLogService, JobService, wait_for_terminal_job
+from ..application.jobs.service import JobLogService, JobService, watch_job
 from ..application.requests.models import TrainingRequestCreateInput, TrainingRequestOpenInput
 from ..application.requests.service import TrainingRequestService
 from ..context import TreqsContext
@@ -12,7 +13,12 @@ from ..errors import ApiError, ConfigError
 from ..git_repository import GitRepository
 from ..help_text import examples
 from ..output import emit_json
-from .jobs import follow_job_logs
+from .jobs import (
+    JobLifecycleRenderer,
+    poll_job_logs_once,
+    render_detached,
+    render_local_status,
+)
 from .shared import load_project_api_context, require_git_repo
 
 
@@ -66,6 +72,8 @@ def run_command(
     yes: bool,
 ) -> None:
     """Create, open, queue, and optionally follow a training request."""
+    if not state.json_output:
+        render_local_status("local", "Validating Git source and workflow")
     require_git_repo(state)
     repository = GitRepository(state.repo_root)
     commit = repository.resolve_commit(source_commit)
@@ -77,6 +85,8 @@ def run_command(
         raise ConfigError(f"Git commit {commit} is not present on an origin tracking branch.")
     if not repository.path_exists_at_commit(commit, workflow):
         raise ConfigError(f"Workflow {workflow} does not exist at commit {commit}.")
+    if not state.json_output:
+        render_local_status("local", f"Source commit ready: {commit[:12]}")
 
     auth_state, repo_context = load_project_api_context(state)
     with TreqsApiClient(auth_state.api_url) as client:
@@ -87,8 +97,7 @@ def run_command(
         except ValueError as exc:
             raise ConfigError(str(exc)) from exc
         selected_target = next(item for item in targets if item.id == target_id)
-        if selected_target.agent is None:
-            raise ConfigError(f"Compute target {selected_target.name} has no registered agent.")
+        validate_run_compute_target(selected_target)
 
         if not yes:
             if not state.is_interactive:
@@ -101,6 +110,8 @@ def run_command(
             click.confirm("Create and queue this training request?", abort=True)
 
         request_service = TrainingRequestService(client, auth_state, repo_context)
+        if not state.json_output:
+            render_local_status("request", "Creating training request")
         request = request_service.create(
             TrainingRequestCreateInput(
                 title=title,
@@ -113,6 +124,8 @@ def run_command(
                 lineage_mode=lineage_mode,
             )
         )
+        if not state.json_output:
+            render_local_status("workflow", "Snapshotting committed workflow")
         opened = request_service.open(
             request.id,
             TrainingRequestOpenInput(
@@ -122,6 +135,8 @@ def run_command(
         )
 
         try:
+            if not state.json_output:
+                render_local_status("queue", f"Queueing on {selected_target.name}")
             queued = request_service.queue(opened.id)
         except ApiError as exc:
             if "approval" not in str(exc).lower() and "reviewer" not in str(exc).lower():
@@ -147,25 +162,45 @@ def run_command(
         if not queued.jobId:
             raise ConfigError(f"Training request {opened.id} queued without a job ID.")
         job_id = queued.jobId
-
-        if follow and not state.json_output:
-            follow_job_logs(
-                JobLogService(client, auth_state, repo_context),
-                target_id,
-                job_id,
-                follow=True,
-                poll_timeout_ms=30000,
-            )
+        detached = False
+        watch_result = None
 
         try:
-            job = (
-                wait_for_terminal_job(
-                    lambda: JobService(client, auth_state, repo_context).get(job_id),
+            job_service = JobService(client, auth_state, repo_context)
+            if follow:
+                renderer = JobLifecycleRenderer()
+                log_service = JobLogService(client, auth_state, repo_context)
+                log_cursor = 0
+                logs_pending = not state.json_output
+
+                def poll_logs(timeout_ms: int = 1000) -> None:
+                    nonlocal log_cursor, logs_pending
+                    if not logs_pending:
+                        return
+                    log_cursor, logs_pending = poll_job_logs_once(
+                        log_service,
+                        target_id,
+                        job_id,
+                        cursor=log_cursor,
+                        timeout_ms=timeout_ms,
+                    )
+
+                watch_result = watch_job(
+                    job_service,
+                    job_id,
                     timeout_seconds=timeout_seconds,
+                    poll_timeout_ms=2000,
+                    on_update=None if state.json_output else renderer.render_update,
+                    on_heartbeat=None if state.json_output else renderer.render_heartbeat,
+                    on_poll=None if state.json_output else poll_logs,
                 )
-                if follow
-                else JobService(client, auth_state, repo_context).get(job_id)
-            )
+                while watch_result.terminal and logs_pending:
+                    poll_logs(30000)
+            job = job_service.get(job_id)
+        except KeyboardInterrupt:
+            detached = True
+            render_detached(job_id)
+            job = JobService(client, auth_state, repo_context).get(job_id)
         except TimeoutError as exc:
             raise ConfigError(str(exc)) from exc
 
@@ -196,5 +231,22 @@ def run_command(
         if job.lineagePublishedUrl:
             click.echo(f"Lineage URL: {job.lineagePublishedUrl}")
 
-    if follow and job.status != "COMPLETED":
+    if follow and not detached and job.status != "COMPLETED":
+        if watch_result is not None and watch_result.snapshot.actionRequired:
+            raise ConfigError(
+                f"Job {job.id} requires action: {watch_result.snapshot.actionRequired}"
+            )
         raise ConfigError(f"Job {job.id} finished with status {job.status}.")
+
+
+def validate_run_compute_target(target: ComputeTarget) -> None:
+    """Allow dormant on-demand targets while retaining manual-start safeguards."""
+    if target.agent is not None:
+        return
+    if target.kind != "on-demand":
+        raise ConfigError(f"Compute target {target.name} has no registered agent.")
+    if target.startupBehavior == "only-if-running":
+        raise ConfigError(
+            f"Compute target {target.name} must be started before queueing "
+            "because its startup behavior is only-if-running."
+        )

@@ -3,13 +3,17 @@ from __future__ import annotations
 import time
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
-from typing import Protocol
+from typing import Protocol, cast
 from urllib.parse import quote
 
 from ...context import OwnerScope, owner_path
+from ...errors import ApiError
 from ...models import AuthState, RepoContext
 from .models import (
     JobStatus,
+    JobUpdatePhase,
+    JobUpdates,
+    JobUpdateSnapshot,
     LineageRepublishResult,
     LogPollResult,
     ProjectJobs,
@@ -34,6 +38,15 @@ class JobsApi(Protocol):
         auth_state: AuthState,
         path: str,
     ) -> TrainingJob: ...
+
+    def poll_job_updates(
+        self,
+        auth_state: AuthState,
+        path: str,
+        *,
+        cursor: str | None,
+        timeout_ms: int,
+    ) -> JobUpdates: ...
 
     def republish_job_lineage(
         self,
@@ -95,6 +108,20 @@ class JobService:
             project_job_path(self.repo_context, job_id),
         )
 
+    def poll_updates(
+        self,
+        job_id: str,
+        *,
+        cursor: str | None,
+        timeout_ms: int,
+    ) -> JobUpdates:
+        return self.client.poll_job_updates(
+            self.auth_state,
+            project_job_updates_path(self.repo_context, job_id),
+            cursor=cursor,
+            timeout_ms=timeout_ms,
+        )
+
     def republish_lineage(self, job_id: str) -> LineageRepublishResult:
         return self.client.republish_job_lineage(
             self.auth_state,
@@ -149,6 +176,113 @@ def wait_for_terminal_job(
         sleep(poll_interval_seconds)
 
 
+class JobWatchSource(Protocol):
+    def poll_updates(
+        self,
+        job_id: str,
+        *,
+        cursor: str | None,
+        timeout_ms: int,
+    ) -> JobUpdates: ...
+
+    def get(self, job_id: str) -> TrainingJob: ...
+
+
+def watch_job(
+    source: JobWatchSource,
+    job_id: str,
+    *,
+    timeout_seconds: float,
+    poll_timeout_ms: int = 25000,
+    heartbeat_seconds: float = 25.0,
+    legacy_poll_interval_seconds: float = 5.0,
+    on_update: Callable[[JobUpdates], None] | None = None,
+    on_heartbeat: Callable[[JobUpdateSnapshot], None] | None = None,
+    on_poll: Callable[[], None] | None = None,
+    monotonic: Callable[[], float] = time.monotonic,
+    sleep: Callable[[float], None] = time.sleep,
+) -> JobUpdates:
+    """Watch lifecycle updates, falling back to coarse status polling on older APIs."""
+    deadline = monotonic() + timeout_seconds
+    cursor: str | None = None
+    seen_event_ids: set[str] = set()
+    all_events = []
+    last_snapshot: str | None = None
+    last_output_at = monotonic()
+    legacy_polling = False
+
+    while monotonic() < deadline:
+        if legacy_polling:
+            update = _legacy_job_update(source.get(job_id))
+        else:
+            remaining_ms = max(0, int((deadline - monotonic()) * 1000))
+            try:
+                update = source.poll_updates(
+                    job_id,
+                    cursor=cursor,
+                    timeout_ms=min(poll_timeout_ms, remaining_ms),
+                )
+            except ApiError as exc:
+                if exc.status_code != 404:
+                    raise
+                legacy_polling = True
+                continue
+            cursor = update.nextCursor or cursor
+
+        new_events = [event for event in update.events if event.id not in seen_event_ids]
+        for event in new_events:
+            seen_event_ids.add(event.id)
+            all_events.append(event)
+
+        snapshot_key = update.snapshot.model_dump_json()
+        snapshot_changed = snapshot_key != last_snapshot
+        callback_update = update.model_copy(update={"events": new_events})
+        if new_events or snapshot_changed:
+            if on_update is not None:
+                on_update(callback_update)
+            last_snapshot = snapshot_key
+            last_output_at = monotonic()
+        elif monotonic() - last_output_at >= heartbeat_seconds:
+            if on_heartbeat is not None:
+                on_heartbeat(update.snapshot)
+            last_output_at = monotonic()
+
+        if on_poll is not None:
+            on_poll()
+
+        if update.terminal or update.snapshot.actionRequired is not None:
+            return update.model_copy(update={"events": all_events, "nextCursor": cursor})
+
+        if legacy_polling:
+            remaining_seconds = max(0.0, deadline - monotonic())
+            sleep(min(legacy_poll_interval_seconds, remaining_seconds))
+
+    raise TimeoutError(f"Timed out after {timeout_seconds:g}s waiting for job {job_id}")
+
+
+def _legacy_job_update(job: TrainingJob) -> JobUpdates:
+    terminal = job.status in TERMINAL_JOB_STATUSES
+    phases: dict[str, tuple[JobUpdatePhase, str]] = {
+        "QUEUED": ("queued", "Job queued"),
+        "ASSIGNED": ("assigned", "Job assigned to an agent"),
+        "ACQUIRED": ("acquired", "Agent acquired the job"),
+        "IN_PROGRESS": ("preparing", "Job is in progress"),
+        "COMPLETED": ("terminal", "Job completed"),
+        "FAILED": ("terminal", "Job failed"),
+        "CANCELLED": ("terminal", "Job cancelled"),
+    }
+    phase, message = phases.get(job.status, ("queued", f"Job status: {job.status}"))
+    return JobUpdates(
+        snapshot=JobUpdateSnapshot(
+            jobStatus=cast(JobStatus, job.status),
+            phase=phase,
+            message=message,
+            lineagePublicationStatus=job.lineagePublicationStatus,
+        ),
+        terminal=terminal,
+    )
+
+
 def project_jobs_path(repo_context: RepoContext) -> str:
     return owner_path(
         repo_context.owner_username,
@@ -159,6 +293,10 @@ def project_jobs_path(repo_context: RepoContext) -> str:
 
 def project_job_path(repo_context: RepoContext, job_id: str) -> str:
     return f"{project_jobs_path(repo_context)}/{quote(job_id, safe='')}"
+
+
+def project_job_updates_path(repo_context: RepoContext, job_id: str) -> str:
+    return f"{project_job_path(repo_context, job_id)}/updates"
 
 
 def job_logs_poll_path(
