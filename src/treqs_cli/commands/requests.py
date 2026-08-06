@@ -23,7 +23,7 @@ from ..application.requests.models import (
     comment_events,
     training_request_rows,
 )
-from ..application.requests.service import TrainingRequestService
+from ..application.requests.service import TrainingRequestService, resolve_reviewer_ids
 from ..config import current_branch
 from ..context import TreqsContext
 from ..errors import ConfigError
@@ -99,6 +99,7 @@ def requests_list_command(
         'treqs tr create --title "Baseline run"',
         'treqs tr create --title "Train v2" --workflow-path .treqs/workflows/train.yaml',
         'treqs tr create --title "GPU run" --compute-target gpu-box --status open',
+        'treqs tr create --title "Needs review" --reviewer christreqs --reviewer jon',
     ),
 )
 @click.option("--title", required=True, help="Training request title.")
@@ -132,6 +133,12 @@ def requests_list_command(
     ),
 )
 @click.option(
+    "--reviewer",
+    "reviewers",
+    multiple=True,
+    help="Reviewer to assign (member username or user ID). Repeat for multiple reviewers.",
+)
+@click.option(
     "--yes",
     "-y",
     is_flag=True,
@@ -149,6 +156,7 @@ def requests_create_command(
     source_branch: str | None,
     source_commit: str | None,
     lineage_mode: str | None,
+    reviewers: tuple[str, ...],
     yes: bool,
 ) -> None:
     """Create a training request in the repo-local project context."""
@@ -163,7 +171,9 @@ def requests_create_command(
         compute_target_id = _resolve_compute_target(
             client, auth_state, repo_context, compute_target
         )
-        request = TrainingRequestService(client, auth_state, repo_context).create(
+        service = TrainingRequestService(client, auth_state, repo_context)
+        reviewer_ids = _resolve_reviewers(service, reviewers)
+        request = service.create(
             TrainingRequestCreateInput(
                 title=title,
                 description=description,
@@ -174,6 +184,7 @@ def requests_create_command(
                 source_branch=resolved_source_branch,
                 source_commit=source_commit,
                 lineage_mode=lineage_mode,
+                assignee_ids=tuple(reviewer_ids),
             )
         )
 
@@ -290,6 +301,8 @@ def requests_comment_command(state: TreqsContext, request_id: str, content: str)
         'treqs tr update <request-id> --title "New title"',
         "treqs tr update <request-id> --compute-target gpu-box",
         "treqs tr update <request-id> --clear-workflow-path",
+        "treqs tr update <request-id> --add-reviewer christreqs",
+        "treqs tr update <request-id> --remove-reviewer christreqs",
     ),
 )
 @click.argument("request_id")
@@ -316,6 +329,19 @@ def requests_comment_command(state: TreqsContext, request_id: str, content: str)
         "public/public_anonymous need confirmation (interactively, or pass --yes)."
     ),
 )
+@click.option(
+    "--add-reviewer",
+    "add_reviewers",
+    multiple=True,
+    help="Reviewer to add (member username or user ID). Repeat for multiple reviewers.",
+)
+@click.option(
+    "--remove-reviewer",
+    "remove_reviewers",
+    multiple=True,
+    help="Reviewer to remove (member username or user ID). Repeat for multiple reviewers.",
+)
+@click.option("--clear-reviewers", is_flag=True, help="Remove all assigned reviewers.")
 @click.option("--clear-description", is_flag=True, help="Clear the request description.")
 @click.option("--clear-workflow-path", is_flag=True, help="Clear the workflow path.")
 @click.option("--clear-compute-target", is_flag=True, help="Clear the compute target selection.")
@@ -341,6 +367,9 @@ def requests_update_command(
     compute_target: str | None,
     source_branch: str | None,
     lineage_mode: str | None,
+    add_reviewers: tuple[str, ...],
+    remove_reviewers: tuple[str, ...],
+    clear_reviewers: bool,
     clear_description: bool,
     clear_workflow_path: bool,
     clear_compute_target: bool,
@@ -366,26 +395,32 @@ def requests_update_command(
         clear_workflow_snapshot=clear_workflow_snapshot,
         clear_lineage_mode=clear_lineage_mode,
     )
-    if all(
-        value is None
-        for value in (
-            title,
-            description,
-            status,
-            workflow_path,
-            workflow_snapshot_id,
-            compute_target,
-            source_branch,
-            lineage_mode,
+    if (
+        all(
+            value is None
+            for value in (
+                title,
+                description,
+                status,
+                workflow_path,
+                workflow_snapshot_id,
+                compute_target,
+                source_branch,
+                lineage_mode,
+            )
         )
-    ) and not any(
-        (
-            clear_description,
-            clear_workflow_path,
-            clear_compute_target,
-            clear_workflow_snapshot,
-            clear_lineage_mode,
+        and not any(
+            (
+                clear_description,
+                clear_workflow_path,
+                clear_compute_target,
+                clear_workflow_snapshot,
+                clear_lineage_mode,
+                clear_reviewers,
+            )
         )
+        and not add_reviewers
+        and not remove_reviewers
     ):
         raise ConfigError("Nothing to update. Provide at least one update option.")
     _confirm_public_lineage_mode(state, lineage_mode, yes)
@@ -394,7 +429,15 @@ def requests_update_command(
         compute_target_id = _resolve_compute_target(
             client, auth_state, repo_context, compute_target
         )
-        request = TrainingRequestService(client, auth_state, repo_context).update(
+        service = TrainingRequestService(client, auth_state, repo_context)
+        assignee_ids = _resolve_updated_reviewers(
+            service,
+            request_id,
+            add_reviewers=add_reviewers,
+            remove_reviewers=remove_reviewers,
+            clear_reviewers=clear_reviewers,
+        )
+        request = service.update(
             request_id,
             TrainingRequestUpdateInput(
                 title=title,
@@ -405,6 +448,7 @@ def requests_update_command(
                 workflow_snapshot_id=workflow_snapshot_id,
                 source_branch=source_branch,
                 lineage_mode=lineage_mode,
+                assignee_ids=assignee_ids,
                 clear_description=clear_description,
                 clear_workflow_path=clear_workflow_path,
                 clear_compute_target=clear_compute_target,
@@ -427,6 +471,12 @@ def requests_update_command(
         click.echo(f"Compute target: {compute_target_id}")
     if request.workflowSnapshotId:
         click.echo(f"Workflow snapshot: {request.workflowSnapshotId}")
+    reviewer_lines = _reviewer_lines(request.assignees, request.reviews)
+    if reviewer_lines:
+        click.echo("")
+        click.echo("Reviewers:")
+        for line in reviewer_lines:
+            click.echo(f"  {line}")
 
 
 @requests_group.command(
@@ -435,22 +485,35 @@ def requests_update_command(
         "treqs tr open <request-id> --compute-target gpu-box",
         "treqs tr open <request-id> --compute-target gpu-box \\",
         "    --workflow-path .treqs/workflows/train.yaml",
+        "treqs tr open <request-id> --compute-target gpu-box --reviewer christreqs",
     ),
 )
 @click.argument("request_id")
 @click.option("--workflow-path", help="Workflow path, for example .treqs/workflows/train.yaml.")
 @click.option("--compute-target", required=True, help="Compute target ID or name.")
+@click.option(
+    "--reviewer",
+    "reviewers",
+    multiple=True,
+    help=(
+        "Reviewer to assign (member username or user ID). Repeat for multiple "
+        "reviewers. Adds to any reviewers already on the request."
+    ),
+)
 @click.pass_obj
 def requests_open_command(
     state: TreqsContext,
     request_id: str,
     workflow_path: str | None,
     compute_target: str,
+    reviewers: tuple[str, ...],
 ) -> None:
     """Open a draft training request for review.
 
     REQUEST_ID is the training request ID shown by `treqs tr list`.
     Opening requires a compute target; once open the request can be queued.
+    An open request needs at least one assigned reviewer before
+    `treqs tr review approve/reject` will accept a decision from them.
     """
     auth_state, repo_context = load_project_api_context(state)
     with TreqsApiClient(auth_state.api_url) as client:
@@ -459,11 +522,19 @@ def requests_open_command(
         )
         if compute_target_id is None:
             raise ConfigError("Compute target is required to open a training request.")
-        request = TrainingRequestService(client, auth_state, repo_context).open(
+        service = TrainingRequestService(client, auth_state, repo_context)
+        new_reviewer_ids = _resolve_reviewers(service, reviewers)
+        # The open endpoint replaces the assignee list wholesale (and defaults
+        # to empty when omitted), so merge in whatever is already assigned to
+        # avoid silently dropping reviewers set at `tr create` time.
+        existing_reviewer_ids = [assignee.userId for assignee in service.get(request_id).assignees]
+        merged_reviewer_ids = list(dict.fromkeys([*existing_reviewer_ids, *new_reviewer_ids]))
+        request = service.open(
             request_id,
             TrainingRequestOpenInput(
                 workflow_path=workflow_path,
                 compute_target_id=compute_target_id,
+                assignee_ids=tuple(merged_reviewer_ids),
             ),
         )
 
@@ -478,6 +549,20 @@ def requests_open_command(
     compute_target_id = _compute_target_id(request.computeSelection)
     if compute_target_id:
         click.echo(f"Compute target: {compute_target_id}")
+    reviewer_lines = _reviewer_lines(request.assignees, request.reviews)
+    if reviewer_lines:
+        click.echo("")
+        click.echo("Reviewers:")
+        for line in reviewer_lines:
+            click.echo(f"  {line}")
+    else:
+        click.echo("")
+        click.echo(
+            "Warning: no reviewers assigned. `treqs tr review approve/reject` requires "
+            "the caller to be an assigned reviewer; add one with "
+            "`treqs tr open --reviewer <user>` or `treqs tr update --add-reviewer <user>`.",
+            err=True,
+        )
 
 
 @requests_group.command(
@@ -649,6 +734,43 @@ def _resolve_compute_target(
         )
     except ValueError as exc:
         raise ConfigError(str(exc)) from exc
+
+
+def _resolve_reviewers(
+    service: TrainingRequestService,
+    selections: tuple[str, ...],
+) -> list[str]:
+    if not selections:
+        return []
+    try:
+        return resolve_reviewer_ids(service.list_potential_reviewers(), selections)
+    except ValueError as exc:
+        raise ConfigError(str(exc)) from exc
+
+
+def _resolve_updated_reviewers(
+    service: TrainingRequestService,
+    request_id: str,
+    *,
+    add_reviewers: tuple[str, ...],
+    remove_reviewers: tuple[str, ...],
+    clear_reviewers: bool,
+) -> tuple[str, ...] | None:
+    """The new full assignee list for `tr update`, or None to leave it untouched."""
+    if not (add_reviewers or remove_reviewers or clear_reviewers):
+        return None
+
+    added_ids = set(_resolve_reviewers(service, add_reviewers))
+    removed_ids = set(_resolve_reviewers(service, remove_reviewers))
+
+    current_ids = (
+        ()
+        if clear_reviewers
+        else tuple(assignee.userId for assignee in service.get(request_id).assignees)
+    )
+    merged_ids = [rid for rid in current_ids if rid not in removed_ids]
+    merged_ids.extend(rid for rid in added_ids if rid not in merged_ids)
+    return tuple(merged_ids)
 
 
 def _validate_update_clear_options(

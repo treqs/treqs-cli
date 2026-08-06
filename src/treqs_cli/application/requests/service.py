@@ -5,6 +5,7 @@ from dataclasses import dataclass
 from typing import Protocol
 
 from ...context import owner_path
+from ...errors import ApiError
 from ...models import AuthState, RepoContext
 from .models import (
     TrainingRequest,
@@ -12,6 +13,7 @@ from .models import (
     TrainingRequestCreateInput,
     TrainingRequestEvent,
     TrainingRequestListFilters,
+    TrainingRequestMember,
     TrainingRequestOpenInput,
     TrainingRequestQueueResult,
     TrainingRequestReviewInput,
@@ -77,6 +79,12 @@ class TrainingRequestApi(Protocol):
         path: str,
         json_payload: dict[str, object],
     ) -> TrainingRequestEvent: ...
+
+    def list_owner_members(
+        self,
+        auth_state: AuthState,
+        path: str,
+    ) -> list[TrainingRequestMember]: ...
 
 
 @dataclass(frozen=True)
@@ -153,6 +161,27 @@ class TrainingRequestService:
             comment_input.to_api_payload(),
         )
 
+    def list_potential_reviewers(self) -> Sequence[TrainingRequestMember]:
+        """Owner members eligible to be assigned as reviewers.
+
+        Only organization owners expose a members list; a personal owner has
+        no one to assign but themselves, so callers fall back to treating
+        `--reviewer` selections as raw user IDs in that case.
+        """
+        try:
+            return self.client.list_owner_members(
+                self.auth_state,
+                owner_path(
+                    self.repo_context.owner_username,
+                    self.repo_context.current_username,
+                    "/members",
+                ),
+            )
+        except ApiError as exc:
+            if exc.status_code == 404:
+                return []
+            raise
+
 
 def training_requests_path(repo_context: RepoContext) -> str:
     return owner_path(
@@ -164,3 +193,40 @@ def training_requests_path(repo_context: RepoContext) -> str:
 
 def training_request_path(repo_context: RepoContext, request_id: str) -> str:
     return f"{training_requests_path(repo_context)}/{request_id}"
+
+
+def resolve_reviewer_ids(
+    members: Sequence[TrainingRequestMember],
+    selections: Sequence[str],
+) -> list[str]:
+    """Resolve --reviewer/--add-reviewer/--remove-reviewer tokens to user IDs.
+
+    Each selection may be a member username (case-insensitive) or a raw user
+    ID. When the owner has no members list available (personal owners don't
+    expose one), tokens are passed through as-is and left for the API to
+    validate.
+    """
+    id_set = {member.id for member in members}
+    username_to_id = {member.username.lower(): member.id for member in members}
+
+    resolved: list[str] = []
+    for selection in selections:
+        token = selection.strip()
+        if not token:
+            raise ValueError("Reviewer selection cannot be empty.")
+        if token in id_set:
+            resolved.append(token)
+            continue
+        matched_id = username_to_id.get(token.lower())
+        if matched_id is not None:
+            resolved.append(matched_id)
+            continue
+        if not members:
+            # No members list to check against (e.g. a personal owner):
+            # assume the token is already a user ID and let the API validate it.
+            resolved.append(token)
+            continue
+        raise ValueError(
+            f"Reviewer not found in owner context: {selection}. Use a member username or user ID."
+        )
+    return resolved

@@ -405,6 +405,8 @@ Options:
                                   the project). Requires --workflow-path.
                                   public/public_anonymous need confirmation
                                   (interactively, or pass --yes).
+  --reviewer TEXT                 Reviewer to assign (member username or user
+                                  ID). Repeat for multiple reviewers.
   -y, --yes                       Skip the public-lineage confirmation prompt
                                   (for non-interactive use).
   --help                          Show this message and exit.
@@ -413,6 +415,7 @@ Options:
     treqs tr create --title "Baseline run"
     treqs tr create --title "Train v2" --workflow-path .treqs/workflows/train.yaml
     treqs tr create --title "GPU run" --compute-target gpu-box --status open
+    treqs tr create --title "Needs review" --reviewer christreqs --reviewer jon
 ```
 
 ## `treqs tr list`
@@ -444,17 +447,23 @@ Usage: treqs tr open [OPTIONS] REQUEST_ID
   Open a draft training request for review.
 
   REQUEST_ID is the training request ID shown by `treqs tr list`. Opening
-  requires a compute target; once open the request can be queued.
+  requires a compute target; once open the request can be queued. An open
+  request needs at least one assigned reviewer before `treqs tr review
+  approve/reject` will accept a decision from them.
 
 Options:
   --workflow-path TEXT   Workflow path, for example .treqs/workflows/train.yaml.
   --compute-target TEXT  Compute target ID or name.  [required]
+  --reviewer TEXT        Reviewer to assign (member username or user ID). Repeat
+                         for multiple reviewers. Adds to any reviewers already
+                         on the request.
   --help                 Show this message and exit.
 
   Examples:
     treqs tr open <request-id> --compute-target gpu-box
     treqs tr open <request-id> --compute-target gpu-box \
         --workflow-path .treqs/workflows/train.yaml
+    treqs tr open <request-id> --compute-target gpu-box --reviewer christreqs
 ```
 
 ## `treqs tr queue`
@@ -573,6 +582,11 @@ Options:
                                   stored or passed here).
                                   public/public_anonymous need confirmation
                                   (interactively, or pass --yes).
+  --add-reviewer TEXT             Reviewer to add (member username or user ID).
+                                  Repeat for multiple reviewers.
+  --remove-reviewer TEXT          Reviewer to remove (member username or user
+                                  ID). Repeat for multiple reviewers.
+  --clear-reviewers               Remove all assigned reviewers.
   --clear-description             Clear the request description.
   --clear-workflow-path           Clear the workflow path.
   --clear-compute-target          Clear the compute target selection.
@@ -586,6 +600,8 @@ Options:
     treqs tr update <request-id> --title "New title"
     treqs tr update <request-id> --compute-target gpu-box
     treqs tr update <request-id> --clear-workflow-path
+    treqs tr update <request-id> --add-reviewer christreqs
+    treqs tr update <request-id> --remove-reviewer christreqs
 ```
 
 ## `treqs run`
