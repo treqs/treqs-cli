@@ -13,6 +13,7 @@ from treqs_cli.application.requests.models import (
     TrainingRequestCreateInput,
     TrainingRequestEvent,
     TrainingRequestListFilters,
+    TrainingRequestMember,
     TrainingRequestOpenInput,
     TrainingRequestQueueResult,
     TrainingRequestReviewInput,
@@ -21,10 +22,10 @@ from treqs_cli.application.requests.models import (
     comment_events,
     training_request_rows,
 )
-from treqs_cli.application.requests.service import TrainingRequestService
+from treqs_cli.application.requests.service import TrainingRequestService, resolve_reviewer_ids
 from treqs_cli.config import AuthStore, RepoContextStore
 from treqs_cli.context import TreqsContext
-from treqs_cli.errors import ConfigError
+from treqs_cli.errors import ApiError, ConfigError
 from treqs_cli.models import AuthState, RepoContext
 
 
@@ -105,6 +106,65 @@ def test_update_input_includes_lineage_mode_when_set() -> None:
     assert update_input.to_api_payload() == {"lineagePublicationMode": "public"}
     # Omitted by default so existing (non-lineage) updates are unchanged.
     assert "lineagePublicationMode" not in TrainingRequestUpdateInput().to_api_payload()
+
+
+def test_create_input_includes_assignee_ids_only_when_set() -> None:
+    assert "assigneeIds" not in TrainingRequestCreateInput(title="x").to_api_payload()
+
+    with_reviewers = TrainingRequestCreateInput(title="x", assignee_ids=("user-1", "user-2"))
+    assert with_reviewers.to_api_payload()["assigneeIds"] == ["user-1", "user-2"]
+
+
+def test_update_input_assignee_ids_none_leaves_reviewers_untouched() -> None:
+    # None (the default) means "don't touch assignees" -- distinct from an
+    # explicit empty tuple, which clears them.
+    assert "assigneeIds" not in TrainingRequestUpdateInput().to_api_payload()
+    assert TrainingRequestUpdateInput(assignee_ids=()).to_api_payload()["assigneeIds"] == []
+    assert TrainingRequestUpdateInput(assignee_ids=("user-1",)).to_api_payload()["assigneeIds"] == [
+        "user-1"
+    ]
+
+
+def test_open_input_assignee_ids_none_omits_field() -> None:
+    # None means the caller isn't managing reviewers here; the server
+    # defaults a missing assigneeIds to [] on /open, wiping any existing
+    # assignees, so callers that care about reviewers must always pass an
+    # explicit (possibly merged) list.
+    open_input = TrainingRequestOpenInput(compute_target_id="ct-1")
+    assert "assigneeIds" not in open_input.to_api_payload()
+
+    open_input_with_reviewers = TrainingRequestOpenInput(
+        compute_target_id="ct-1", assignee_ids=("user-1",)
+    )
+    assert open_input_with_reviewers.to_api_payload()["assigneeIds"] == ["user-1"]
+
+
+def test_resolve_reviewer_ids_matches_username_case_insensitively() -> None:
+    members = [
+        TrainingRequestMember(id="user-1", username="Alice", name="Alice Doe"),
+        TrainingRequestMember(id="user-2", username="bob"),
+    ]
+
+    assert resolve_reviewer_ids(members, ["alice", "BOB"]) == ["user-1", "user-2"]
+
+
+def test_resolve_reviewer_ids_matches_raw_user_id() -> None:
+    members = [TrainingRequestMember(id="user-1", username="alice")]
+
+    assert resolve_reviewer_ids(members, ["user-1"]) == ["user-1"]
+
+
+def test_resolve_reviewer_ids_passes_through_when_no_members_available() -> None:
+    # Personal owners don't expose a members list; treat the token as
+    # already being a user ID and let the API validate it.
+    assert resolve_reviewer_ids([], ["some-user-id"]) == ["some-user-id"]
+
+
+def test_resolve_reviewer_ids_raises_for_unknown_selection() -> None:
+    members = [TrainingRequestMember(id="user-1", username="alice")]
+
+    with pytest.raises(ValueError, match="Reviewer not found"):
+        resolve_reviewer_ids(members, ["someone-else"])
 
 
 def test_confirm_public_lineage_mode_noop_for_private_or_unset(tmp_path: Path) -> None:
@@ -358,6 +418,39 @@ def test_training_request_service_builds_owner_scoped_paths() -> None:
         ),
     ]
 
+    members = service.list_potential_reviewers()
+
+    assert [member.id for member in members] == ["user-1"]
+    assert client.calls[-1] == ("members", "/api/v1/user/orgs/acme/members")
+
+
+def test_list_potential_reviewers_falls_back_to_empty_on_404() -> None:
+    class _NoMembersEndpointClient(_FakeTrainingRequestClient):
+        def list_owner_members(
+            self,
+            _auth_state: AuthState,
+            path: str,
+        ) -> list[TrainingRequestMember]:
+            self.calls.append(("members", path))
+            raise ApiError("Route not found", status_code=404)
+
+    client = _NoMembersEndpointClient()
+    auth_state = AuthState(api_url="https://api.treqs.ai", access_token="access-token")
+    repo_context = RepoContext(
+        api_url="https://api.treqs.ai",
+        owner_id="user-1",
+        owner_type="user",
+        owner_username="trevor",
+        owner_display_name="Trevor",
+        project_id="project-1",
+        project_slug="mnist",
+        project_name="MNIST",
+        current_username="trevor",
+    )
+    service = TrainingRequestService(client, auth_state, repo_context)
+
+    assert service.list_potential_reviewers() == []
+
 
 class _FakeTrainingRequestClient:
     def __init__(self) -> None:
@@ -492,3 +585,11 @@ class _FakeTrainingRequestClient:
             content=str(json_payload["content"]),
             userId="user-1",
         )
+
+    def list_owner_members(
+        self,
+        _auth_state: AuthState,
+        path: str,
+    ) -> list[TrainingRequestMember]:
+        self.calls.append(("members", path))
+        return [TrainingRequestMember(id="user-1", username="alice")]

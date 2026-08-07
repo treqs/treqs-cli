@@ -23,6 +23,7 @@ from .application.projects.models import Project
 from .application.requests.models import (
     TrainingRequest,
     TrainingRequestEvent,
+    TrainingRequestMember,
     TrainingRequestQueueResult,
     TrainingRequestReviewResult,
 )
@@ -216,6 +217,14 @@ class TreqsApiClient:
             json_payload=json_payload,
         )
         return TrainingRequestEvent.model_validate(_unwrap_data(payload))
+
+    def list_owner_members(
+        self,
+        auth_state: AuthState,
+        path: str,
+    ) -> list[TrainingRequestMember]:
+        payload = self.request_json("GET", path, auth_state=auth_state)
+        return [TrainingRequestMember.model_validate(item) for item in _unwrap_list_data(payload)]
 
     def open_training_request(
         self,

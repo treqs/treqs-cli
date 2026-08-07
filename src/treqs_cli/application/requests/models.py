@@ -27,6 +27,7 @@ class TrainingRequestCreateInput(BaseModel):
     source_branch: str | None = None
     source_commit: str | None = None
     lineage_mode: str | None = None
+    assignee_ids: tuple[str, ...] = ()
 
     def to_api_payload(self) -> dict[str, object]:
         payload: dict[str, object] = {"title": self.title, "status": self.status}
@@ -48,6 +49,8 @@ class TrainingRequestCreateInput(BaseModel):
             payload["codeConfig"] = code_config
         if self.lineage_mode is not None:
             payload["lineagePublicationMode"] = self.lineage_mode
+        if self.assignee_ids:
+            payload["assigneeIds"] = list(self.assignee_ids)
         return payload
 
 
@@ -62,6 +65,7 @@ class TrainingRequestUpdateInput(BaseModel):
     workflow_snapshot_id: str | None = None
     source_branch: str | None = None
     lineage_mode: str | None = None
+    assignee_ids: tuple[str, ...] | None = None
     clear_description: bool = False
     clear_workflow_path: bool = False
     clear_compute_target: bool = False
@@ -99,6 +103,8 @@ class TrainingRequestUpdateInput(BaseModel):
             payload["lineagePublicationMode"] = None
         elif self.lineage_mode is not None:
             payload["lineagePublicationMode"] = self.lineage_mode
+        if self.assignee_ids is not None:
+            payload["assigneeIds"] = list(self.assignee_ids)
         return payload
 
 
@@ -107,11 +113,14 @@ class TrainingRequestOpenInput(BaseModel):
 
     workflow_path: str | None = None
     compute_target_id: str
+    assignee_ids: tuple[str, ...] | None = None
 
     def to_api_payload(self) -> dict[str, object]:
         payload: dict[str, object] = {"computeSelection": {"targetId": self.compute_target_id}}
         if self.workflow_path is not None:
             payload["workflowPath"] = self.workflow_path
+        if self.assignee_ids is not None:
+            payload["assigneeIds"] = list(self.assignee_ids)
         return payload
 
 
@@ -143,6 +152,17 @@ class TrainingRequestEvent(BaseModel):
     user: TrainingRequestUser | None = None
     createdAt: str | None = None
     updatedAt: str | None = None
+
+
+class TrainingRequestMember(BaseModel):
+    """An owner member who can be assigned as a reviewer, from the owner members API."""
+
+    model_config = ConfigDict(extra="allow")
+
+    id: str
+    username: str
+    name: str | None = None
+    email: str | None = None
 
 
 class TrainingRequestAssignee(BaseModel):

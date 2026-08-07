@@ -289,11 +289,17 @@ def test_requests_commands_use_repo_project_context(
         ),
         ("compute-targets", "/api/v1/user/compute-targets", "https://api.treqs.ai", False),
         (
+            "show",
+            "/api/v1/user/projects/mnist/training-requests/request-1",
+            "https://api.treqs.ai",
+        ),
+        (
             "open",
             "/api/v1/user/projects/mnist/training-requests/request-1/open",
             {
                 "workflowPath": ".github/workflows/train.yml",
                 "computeSelection": {"targetId": "ct-1"},
+                "assigneeIds": [],
             },
         ),
         (
