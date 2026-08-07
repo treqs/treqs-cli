@@ -141,15 +141,15 @@ def test_open_input_assignee_ids_none_omits_field() -> None:
 
 def test_resolve_reviewer_ids_matches_username_case_insensitively() -> None:
     members = [
-        TrainingRequestMember(id="user-1", username="Jon", name="Jon Geyer"),
-        TrainingRequestMember(id="user-2", username="christreqs"),
+        TrainingRequestMember(id="user-1", username="Alice", name="Alice Doe"),
+        TrainingRequestMember(id="user-2", username="bob"),
     ]
 
-    assert resolve_reviewer_ids(members, ["jon", "CHRISTREQS"]) == ["user-1", "user-2"]
+    assert resolve_reviewer_ids(members, ["alice", "BOB"]) == ["user-1", "user-2"]
 
 
 def test_resolve_reviewer_ids_matches_raw_user_id() -> None:
-    members = [TrainingRequestMember(id="user-1", username="jon")]
+    members = [TrainingRequestMember(id="user-1", username="alice")]
 
     assert resolve_reviewer_ids(members, ["user-1"]) == ["user-1"]
 
@@ -161,7 +161,7 @@ def test_resolve_reviewer_ids_passes_through_when_no_members_available() -> None
 
 
 def test_resolve_reviewer_ids_raises_for_unknown_selection() -> None:
-    members = [TrainingRequestMember(id="user-1", username="jon")]
+    members = [TrainingRequestMember(id="user-1", username="alice")]
 
     with pytest.raises(ValueError, match="Reviewer not found"):
         resolve_reviewer_ids(members, ["someone-else"])
@@ -592,4 +592,4 @@ class _FakeTrainingRequestClient:
         path: str,
     ) -> list[TrainingRequestMember]:
         self.calls.append(("members", path))
-        return [TrainingRequestMember(id="user-1", username="jon")]
+        return [TrainingRequestMember(id="user-1", username="alice")]

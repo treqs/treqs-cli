@@ -99,7 +99,7 @@ def requests_list_command(
         'treqs tr create --title "Baseline run"',
         'treqs tr create --title "Train v2" --workflow-path .treqs/workflows/train.yaml',
         'treqs tr create --title "GPU run" --compute-target gpu-box --status open',
-        'treqs tr create --title "Needs review" --reviewer christreqs --reviewer jon',
+        'treqs tr create --title "Needs review" --reviewer <user> --reviewer <user>',
     ),
 )
 @click.option("--title", required=True, help="Training request title.")
@@ -301,8 +301,8 @@ def requests_comment_command(state: TreqsContext, request_id: str, content: str)
         'treqs tr update <request-id> --title "New title"',
         "treqs tr update <request-id> --compute-target gpu-box",
         "treqs tr update <request-id> --clear-workflow-path",
-        "treqs tr update <request-id> --add-reviewer christreqs",
-        "treqs tr update <request-id> --remove-reviewer christreqs",
+        "treqs tr update <request-id> --add-reviewer <user>",
+        "treqs tr update <request-id> --remove-reviewer <user>",
     ),
 )
 @click.argument("request_id")
@@ -485,7 +485,7 @@ def requests_update_command(
         "treqs tr open <request-id> --compute-target gpu-box",
         "treqs tr open <request-id> --compute-target gpu-box \\",
         "    --workflow-path .treqs/workflows/train.yaml",
-        "treqs tr open <request-id> --compute-target gpu-box --reviewer christreqs",
+        "treqs tr open <request-id> --compute-target gpu-box --reviewer <user>",
     ),
 )
 @click.argument("request_id")

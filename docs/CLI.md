@@ -415,7 +415,7 @@ Options:
     treqs tr create --title "Baseline run"
     treqs tr create --title "Train v2" --workflow-path .treqs/workflows/train.yaml
     treqs tr create --title "GPU run" --compute-target gpu-box --status open
-    treqs tr create --title "Needs review" --reviewer christreqs --reviewer jon
+    treqs tr create --title "Needs review" --reviewer <user> --reviewer <user>
 ```
 
 ## `treqs tr list`
@@ -463,7 +463,7 @@ Options:
     treqs tr open <request-id> --compute-target gpu-box
     treqs tr open <request-id> --compute-target gpu-box \
         --workflow-path .treqs/workflows/train.yaml
-    treqs tr open <request-id> --compute-target gpu-box --reviewer christreqs
+    treqs tr open <request-id> --compute-target gpu-box --reviewer <user>
 ```
 
 ## `treqs tr queue`
@@ -600,8 +600,8 @@ Options:
     treqs tr update <request-id> --title "New title"
     treqs tr update <request-id> --compute-target gpu-box
     treqs tr update <request-id> --clear-workflow-path
-    treqs tr update <request-id> --add-reviewer christreqs
-    treqs tr update <request-id> --remove-reviewer christreqs
+    treqs tr update <request-id> --add-reviewer <user>
+    treqs tr update <request-id> --remove-reviewer <user>
 ```
 
 ## `treqs run`
