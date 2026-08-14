@@ -16,6 +16,7 @@ from ..application.jobs.models import (
     JobUpdates,
     JobUpdateSnapshot,
     job_rows,
+    task_rows,
 )
 from ..application.jobs.service import (
     JobLogService,
@@ -282,6 +283,14 @@ def jobs_watch_command(
     if updates.snapshot.jobStatus != "COMPLETED":
         if updates.snapshot.actionRequired:
             raise ConfigError(f"Job {job_id} requires action: {updates.snapshot.actionRequired}")
+        # Name the failing step when the server reports one. Without this the
+        # only thing a caller learns from a failed job is its coarse status.
+        task = updates.snapshot.task
+        if task is not None:
+            raise ConfigError(
+                f"Job {job_id} finished with status {updates.snapshot.jobStatus} "
+                f"at {task.describe_failure()}."
+            )
         raise ConfigError(f"Job {job_id} finished with status {updates.snapshot.jobStatus}.")
 
 
@@ -347,6 +356,56 @@ def jobs_cancel_command(state: TreqsContext, job_id: str, target: str | None) ->
 
     click.echo(f"Cancelled job {job.id}.")
     click.echo(f"Status: {job.status}")
+
+
+@jobs_group.command(
+    "tasks",
+    epilog=examples(
+        "treqs jobs tasks <job-id>",
+        "treqs jobs tasks <job-id> --target gpu-box",
+        "treqs --json jobs tasks <job-id>",
+    ),
+)
+@click.argument("job_id")
+@click.option("--target", "target", help="Compute target ID or name. Defaults to the job's target.")
+@click.pass_obj
+def jobs_tasks_command(
+    state: TreqsContext,
+    job_id: str,
+    target: str | None,
+) -> None:
+    """Show each task of a job with its status and exit code.
+
+    JOB_ID is the job ID shown by `treqs jobs list` or printed by
+    `treqs tr queue`.
+
+    An empty EXIT column means no exit code was recorded, which is different
+    from exit 0 — most often a task that never launched.
+    """
+    auth_state, repo_context = load_project_api_context(state)
+    scope = OwnerScope(
+        owner_username=repo_context.owner_username,
+        current_username=repo_context.current_username,
+    )
+    with TreqsApiClient(auth_state.api_url) as client:
+        target_id = _resolve_job_target_id(client, auth_state, repo_context, scope, job_id, target)
+        tasks = JobService(client, auth_state, repo_context).tasks(target_id, job_id)
+
+    if state.json_output:
+        emit_json(tasks)
+        return
+
+    render_table(
+        task_rows(tasks),
+        [
+            ("name", "NAME"),
+            ("status", "STATUS"),
+            ("exit", "EXIT"),
+            ("reason", "REASON"),
+            ("error", "ERROR"),
+            ("started", "STARTED"),
+        ],
+    )
 
 
 @jobs_group.command(

@@ -18,6 +18,7 @@ from .models import (
     LogPollResult,
     ProjectJobs,
     TrainingJob,
+    TrainingTask,
 )
 
 TERMINAL_JOB_STATUSES = frozenset({"COMPLETED", "FAILED", "CANCELLED"})
@@ -59,6 +60,12 @@ class JobsApi(Protocol):
         auth_state: AuthState,
         path: str,
     ) -> TrainingJob: ...
+
+    def list_job_tasks(
+        self,
+        auth_state: AuthState,
+        path: str,
+    ) -> list[TrainingTask]: ...
 
 
 class JobLogApi(Protocol):
@@ -132,6 +139,12 @@ class JobService:
         return self.client.cancel_job(
             self.auth_state,
             job_cancel_path(self.repo_context, target_id, job_id),
+        )
+
+    def tasks(self, target_id: str, job_id: str) -> list[TrainingTask]:
+        return self.client.list_job_tasks(
+            self.auth_state,
+            job_tasks_path(self.repo_context, target_id, job_id),
         )
 
 
@@ -308,6 +321,18 @@ def job_logs_poll_path(
         scope.owner_username,
         scope.current_username,
         f"/compute-targets/{quote(target_id, safe='')}/jobs/{quote(job_id, safe='')}/logs/poll",
+    )
+
+
+def job_tasks_path(
+    scope: OwnerScope | RepoContext,
+    target_id: str,
+    job_id: str,
+) -> str:
+    return owner_path(
+        scope.owner_username,
+        scope.current_username,
+        f"/compute-targets/{quote(target_id, safe='')}/jobs/{quote(job_id, safe='')}/tasks",
     )
 
 
