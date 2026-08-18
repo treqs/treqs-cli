@@ -11,6 +11,7 @@ from ..application.compute.service import (
     resolve_compute_target_id,
 )
 from ..application.jobs.models import (
+    AGENT_LOG_STREAM,
     JOB_STATUSES,
     JobStatus,
     JobUpdates,
@@ -413,12 +414,24 @@ def jobs_tasks_command(
     epilog=examples(
         "treqs jobs logs <job-id>",
         "treqs jobs logs <job-id> --follow",
-        "treqs jobs logs <job-id> --target gpu-box --follow",
+        "treqs jobs logs <job-id> --agent",
+        "treqs jobs logs <job-id> --task <task-id>",
     ),
 )
 @click.argument("job_id")
 @click.option("--target", "target", help="Compute target ID or name. Defaults to the job's target.")
 @click.option("--follow", is_flag=True, help="Keep polling until the job's logs are complete.")
+@click.option(
+    "--agent",
+    "agent",
+    is_flag=True,
+    help="Show the agent's own log instead of the workload's output.",
+)
+@click.option(
+    "--task",
+    "task",
+    help="Show only the output of one task. Takes a task ID from `treqs jobs tasks`.",
+)
 @click.option(
     "--poll-timeout-ms",
     type=click.IntRange(1000, 60000),
@@ -432,13 +445,25 @@ def jobs_logs_command(
     job_id: str,
     target: str | None,
     follow: bool,
+    agent: bool,
+    task: str | None,
     poll_timeout_ms: int,
 ) -> None:
     """Print logs for a job, optionally following until complete.
 
     JOB_ID is the job ID shown by `treqs jobs list` or printed by
     `treqs tr queue`.
+
+    A job's log has more than one producer. By default this prints the
+    workload's own output. `--agent` prints what the agent recorded about the
+    job instead, which is where a task that fails before its command runs
+    explains itself. `--task` narrows the workload output to one step.
     """
+    if agent and task:
+        raise ConfigError("Pass either --agent or --task, not both: they select different streams.")
+
+    stream = AGENT_LOG_STREAM if agent else task
+
     auth_state, repo_context = load_project_api_context(state)
     scope = OwnerScope(
         owner_username=repo_context.owner_username,
@@ -452,6 +477,7 @@ def jobs_logs_command(
             job_id,
             follow=follow,
             poll_timeout_ms=poll_timeout_ms,
+            stream=stream,
         )
 
 
@@ -462,6 +488,7 @@ def follow_job_logs(
     *,
     follow: bool,
     poll_timeout_ms: int,
+    stream: str | None = None,
 ) -> None:
     """Render paged job logs and optionally follow them to completion."""
     cursor = 0
@@ -472,6 +499,7 @@ def follow_job_logs(
             job_id,
             cursor=cursor,
             timeout_ms=poll_timeout_ms,
+            stream=stream,
         )
         if not has_more or not follow:
             break
@@ -484,13 +512,15 @@ def poll_job_logs_once(
     *,
     cursor: int,
     timeout_ms: int,
+    stream: str | None = None,
 ) -> tuple[int, bool]:
-    """Render one workload-log poll and return its next cursor and continuation state."""
+    """Render one log poll and return its next cursor and continuation state."""
     result = log_service.poll(
         target_id,
         job_id,
         from_sequence=cursor,
         timeout_ms=timeout_ms,
+        stream=stream,
     )
     for chunk in result.chunks:
         click.echo(chunk.content, nl=False)

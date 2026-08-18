@@ -307,8 +307,9 @@ def _resolve_aws_resources(
         primary = _prompt_choice(
             "primary subnet",
             remaining_subnets,
-            format_item=lambda s: f"{s.id}  (az={s.availabilityZone})"
-            + (f"  {s.name}" if s.name else ""),
+            format_item=lambda s: (
+                f"{s.id}  (az={s.availabilityZone})" + (f"  {s.name}" if s.name else "")
+            ),
             get_id=lambda s: s.id,
             required=False,
             error=errors.get("subnets"),
@@ -323,8 +324,9 @@ def _resolve_aws_resources(
                 fallback = _prompt_choice(
                     "fallback subnet",
                     remaining_subnets,
-                    format_item=lambda s: f"{s.id}  (az={s.availabilityZone})"
-                    + (f"  {s.name}" if s.name else ""),
+                    format_item=lambda s: (
+                        f"{s.id}  (az={s.availabilityZone})" + (f"  {s.name}" if s.name else "")
+                    ),
                     get_id=lambda s: s.id,
                     required=False,
                 )

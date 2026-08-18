@@ -445,6 +445,7 @@ class TreqsApiClient:
         *,
         from_sequence: int,
         timeout_ms: int,
+        stream: str | None = None,
     ) -> LogPollResult:
         # Keep the HTTP read timeout safely above the server-side long-poll timeout so
         # the request does not abort before the API returns.
@@ -453,7 +454,13 @@ class TreqsApiClient:
             "GET",
             path,
             auth_state=auth_state,
-            params={"from": from_sequence, "timeout": timeout_ms},
+            params={
+                "from": from_sequence,
+                "timeout": timeout_ms,
+                # Omitted entirely when unset: an older API rejects unknown query
+                # params, and the server's own default is the workload stream.
+                **({"stream": stream} if stream else {}),
+            },
             timeout=http_timeout,
         )
         return LogPollResult.model_validate(_unwrap_data(payload))
