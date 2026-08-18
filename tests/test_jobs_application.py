@@ -8,19 +8,23 @@ from treqs_cli.application.jobs.models import (
     JobUpdatePhase,
     JobUpdates,
     JobUpdateSnapshot,
+    JobUpdateTask,
     LineageRepublishResult,
     LogChunk,
     LogPollResult,
     ProjectJobs,
     TrainingJob,
+    TrainingTask,
     filter_jobs,
     job_rows,
+    task_rows,
 )
 from treqs_cli.application.jobs.service import (
     JobLogService,
     JobService,
     job_cancel_path,
     job_logs_poll_path,
+    job_tasks_path,
     project_job_path,
     project_job_updates_path,
     project_jobs_path,
@@ -453,6 +457,24 @@ class _FakeJobsClient:
             ]
         )
 
+    def list_job_tasks(
+        self,
+        _auth_state: AuthState,
+        path: str,
+    ) -> list[TrainingTask]:
+        self.calls.append(("tasks", path))
+        return [
+            TrainingTask(
+                id="task-1",
+                name="setup",
+                status="FAILED",
+                exitCode=-1,
+                failureReason="WORKING_DIRECTORY_MISSING",
+                errorClass="FileNotFoundError",
+            ),
+            TrainingTask(id="task-2", name="train", status="PENDING"),
+        ]
+
     def republish_job_lineage(
         self,
         _auth_state: AuthState,
@@ -557,3 +579,65 @@ class _LegacyWatchSource:
     def get(self, job_id: str) -> TrainingJob:
         self.get_calls += 1
         return TrainingJob(id=job_id, status="COMPLETED")
+
+
+def test_job_service_tasks_builds_compute_target_scoped_path() -> None:
+    client = _FakeJobsClient()
+    auth_state = AuthState(api_url="https://api.treqs.ai", access_token="access-token")
+    repo_context = RepoContext(
+        api_url="https://api.treqs.ai",
+        owner_id="org-1",
+        owner_type="organization",
+        owner_username="acme",
+        owner_display_name="Acme",
+        project_id="project-1",
+        project_slug="mnist",
+        project_name="MNIST",
+        current_username="trevor",
+    )
+
+    tasks = JobService(client, auth_state, repo_context).tasks("ct-1", "job-1")
+
+    assert [task.name for task in tasks] == ["setup", "train"]
+    assert tasks[0].exitCode == -1
+    assert tasks[0].failureReason == "WORKING_DIRECTORY_MISSING"
+    assert job_tasks_path(repo_context, "ct-1", "job-1") == (
+        "/api/v1/user/orgs/acme/compute-targets/ct-1/jobs/job-1/tasks"
+    )
+    assert client.calls == [
+        ("tasks", "/api/v1/user/orgs/acme/compute-targets/ct-1/jobs/job-1/tasks"),
+    ]
+
+
+def test_task_rows_distinguish_no_exit_code_from_exit_zero() -> None:
+    """An unrecorded exit code most often means the task never launched."""
+    rows = task_rows(
+        [
+            TrainingTask(id="t1", name="setup", status="FAILED", exitCode=-1),
+            TrainingTask(id="t2", name="train", status="COMPLETED", exitCode=0),
+            TrainingTask(id="t3", name="publish", status="PENDING"),
+        ]
+    )
+
+    assert [row["exit"] for row in rows] == ["-1", "0", ""]
+
+
+def test_job_update_task_describes_what_is_known_about_a_failure() -> None:
+    full = JobUpdateTask(
+        id="t1",
+        name="setup",
+        status="FAILED",
+        exitCode=-1,
+        failureReason="WORKING_DIRECTORY_MISSING",
+        errorClass="FileNotFoundError",
+    )
+    assert full.describe_failure() == (
+        "task setup (exit code -1, WORKING_DIRECTORY_MISSING, FileNotFoundError)"
+    )
+
+    # An older server sends neither field; say the name and claim nothing more.
+    bare = JobUpdateTask(id="t1", name="setup", status="FAILED")
+    assert bare.describe_failure() == "task setup"
+
+    exit_only = JobUpdateTask(id="t1", name="train", status="FAILED", exitCode=1)
+    assert exit_only.describe_failure() == "task train (exit code 1)"

@@ -18,6 +18,7 @@ from .application.jobs.models import (
     LogPollResult,
     ProjectJobs,
     TrainingJob,
+    TrainingTask,
 )
 from .application.projects.models import Project
 from .application.requests.models import (
@@ -428,6 +429,14 @@ class TreqsApiClient:
     ) -> TrainingJob:
         payload = self.request_json("POST", path, auth_state=auth_state)
         return TrainingJob.model_validate(_unwrap_data(payload))
+
+    def list_job_tasks(
+        self,
+        auth_state: AuthState,
+        path: str,
+    ) -> list[TrainingTask]:
+        payload = self.request_json("GET", path, auth_state=auth_state)
+        return [TrainingTask.model_validate(item) for item in _unwrap_list_data(payload)]
 
     def poll_job_logs(
         self,

@@ -872,6 +872,7 @@ Commands:
   logs               Print logs for a job, optionally following until...
   republish-lineage  Re-publish a job's stored lineage package to GLaaS.
   show               Show one job from the repo-local project context.
+  tasks              Show each task of a job with its status and exit code.
   wait               Wait for a job to complete, fail, or be cancelled.
   watch              Stream lifecycle status and workload logs until a job...
 ```
@@ -977,6 +978,29 @@ Options:
   Examples:
     treqs jobs show <job-id>
     treqs --json jobs show <job-id>
+```
+
+## `treqs jobs tasks`
+
+```
+Usage: treqs jobs tasks [OPTIONS] JOB_ID
+
+  Show each task of a job with its status and exit code.
+
+  JOB_ID is the job ID shown by `treqs jobs list` or printed by `treqs tr
+  queue`.
+
+  An empty EXIT column means no exit code was recorded, which is different from
+  exit 0 — most often a task that never launched.
+
+Options:
+  --target TEXT  Compute target ID or name. Defaults to the job's target.
+  --help         Show this message and exit.
+
+  Examples:
+    treqs jobs tasks <job-id>
+    treqs jobs tasks <job-id> --target gpu-box
+    treqs --json jobs tasks <job-id>
 ```
 
 ## `treqs jobs wait`

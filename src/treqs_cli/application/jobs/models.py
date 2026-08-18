@@ -72,6 +72,34 @@ class TrainingJob(BaseModel):
     completedAt: str | None = None
 
 
+class TrainingTask(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
+    id: str
+    name: str
+    status: str
+    exitCode: int | None = None
+    failureReason: str | None = None
+    errorClass: str | None = None
+    startedAt: str | None = None
+    completedAt: str | None = None
+
+
+def task_rows(tasks: Sequence[TrainingTask]) -> list[dict[str, str]]:
+    return [
+        {
+            "name": task.name,
+            "status": task.status,
+            # An unrecorded exit code is not exit 0; show it as absent.
+            "exit": "" if task.exitCode is None else str(task.exitCode),
+            "reason": task.failureReason or "",
+            "error": task.errorClass or "",
+            "started": task.startedAt or "",
+        }
+        for task in tasks
+    ]
+
+
 class ProjectJobs(BaseModel):
     model_config = ConfigDict(extra="allow")
 
@@ -99,6 +127,25 @@ class JobUpdateTask(BaseModel):
     id: str
     name: str
     status: str
+    # A terminal snapshot names the task that ended the job. exitCode is absent
+    # on older servers and null when the task never launched; neither is the
+    # same as exit 0, so both stay None rather than defaulting to a number.
+    exitCode: int | None = None
+    failureReason: str | None = None
+    errorClass: str | None = None
+
+    def describe_failure(self) -> str:
+        """One line naming the step that failed, and what is known about why."""
+        detail = []
+        if self.exitCode is not None:
+            detail.append(f"exit code {self.exitCode}")
+        if self.failureReason:
+            detail.append(self.failureReason)
+        if self.errorClass:
+            detail.append(self.errorClass)
+        if not detail:
+            return f"task {self.name}"
+        return f"task {self.name} ({', '.join(detail)})"
 
 
 class JobUpdateSnapshot(BaseModel):
