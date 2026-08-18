@@ -3,6 +3,7 @@ from __future__ import annotations
 import pytest
 
 from treqs_cli.application.jobs.models import (
+    AGENT_LOG_STREAM,
     JobLifecycleEvent,
     JobStatus,
     JobUpdatePhase,
@@ -424,6 +425,7 @@ class _FakeJobLogClient:
         *,
         from_sequence: int,
         timeout_ms: int,
+        stream: str | None = None,
     ) -> LogPollResult:
         self.calls.append(("poll", path, from_sequence, timeout_ms))
         return LogPollResult(
@@ -641,3 +643,70 @@ def test_job_update_task_describes_what_is_known_about_a_failure() -> None:
 
     exit_only = JobUpdateTask(id="t1", name="train", status="FAILED", exitCode=1)
     assert exit_only.describe_failure() == "task train (exit code 1)"
+
+
+def test_log_poll_omits_stream_when_none_is_selected() -> None:
+    """An older API rejects unknown query params, and the server's own default is
+    the workload stream — so an unselected stream must not appear at all."""
+    captured: dict[str, object] = {}
+
+    class _RecordingClient:
+        def poll_job_logs(
+            self,
+            _auth_state: AuthState,
+            path: str,
+            *,
+            from_sequence: int,
+            timeout_ms: int,
+            stream: str | None = None,
+        ) -> LogPollResult:
+            captured["stream"] = stream
+            captured["path"] = path
+            return LogPollResult(chunks=[], hasMore=False, nextSequence=0)
+
+    auth_state = AuthState(api_url="https://api.treqs.ai", access_token="access-token")
+    scope = OwnerScope(owner_username="acme", current_username="trevor")
+
+    JobLogService(_RecordingClient(), auth_state, scope).poll(
+        "ct-1", "job-1", from_sequence=0, timeout_ms=1000
+    )
+
+    assert captured["stream"] is None
+
+
+def test_log_poll_forwards_the_selected_stream() -> None:
+    captured: dict[str, object] = {}
+
+    class _RecordingClient:
+        def poll_job_logs(
+            self,
+            _auth_state: AuthState,
+            path: str,
+            *,
+            from_sequence: int,
+            timeout_ms: int,
+            stream: str | None = None,
+        ) -> LogPollResult:
+            captured["stream"] = stream
+            return LogPollResult(chunks=[], hasMore=False, nextSequence=0)
+
+    auth_state = AuthState(api_url="https://api.treqs.ai", access_token="access-token")
+    scope = OwnerScope(owner_username="acme", current_username="trevor")
+    service = JobLogService(_RecordingClient(), auth_state, scope)
+
+    service.poll("ct-1", "job-1", from_sequence=0, timeout_ms=1000, stream=AGENT_LOG_STREAM)
+    assert captured["stream"] == "@agent"
+
+    service.poll("ct-1", "job-1", from_sequence=0, timeout_ms=1000, stream="task-uuid")
+    assert captured["stream"] == "task-uuid"
+
+
+def test_agent_stream_sentinel_cannot_collide_with_a_task_id() -> None:
+    """A task's stream is its id, so the sentinel must not look like one."""
+    import re
+
+    assert not re.fullmatch(
+        r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}",
+        AGENT_LOG_STREAM,
+        re.IGNORECASE,
+    )

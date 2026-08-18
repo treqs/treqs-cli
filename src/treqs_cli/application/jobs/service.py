@@ -76,6 +76,7 @@ class JobLogApi(Protocol):
         *,
         from_sequence: int,
         timeout_ms: int,
+        stream: str | None = None,
     ) -> LogPollResult: ...
 
 
@@ -161,12 +162,14 @@ class JobLogService:
         *,
         from_sequence: int,
         timeout_ms: int,
+        stream: str | None = None,
     ) -> LogPollResult:
         return self.client.poll_job_logs(
             self.auth_state,
             job_logs_poll_path(self.scope, target_id, job_id),
             from_sequence=from_sequence,
             timeout_ms=timeout_ms,
+            stream=stream,
         )
 
 

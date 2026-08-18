@@ -9,6 +9,7 @@ import httpx
 from .application.compute.models import (
     AwsLaunchOptions,
     ComputeTarget,
+    OnDemandInstance,
     RegistrationCode,
     SecretMetadata,
 )
@@ -296,6 +297,18 @@ class TreqsApiClient:
         payload = self.request_json("GET", path, auth_state=auth_state, params=params)
         return [ComputeTarget.model_validate(item) for item in _unwrap_list_data(payload)]
 
+    def list_on_demand_instances(
+        self,
+        auth_state: AuthState,
+        path: str,
+    ) -> list[OnDemandInstance]:
+        payload = self.request_json("GET", path, auth_state=auth_state)
+        data = _unwrap_data(payload)
+        # This endpoint nests its list under `instances` rather than returning a
+        # bare array, unlike the other compute reads.
+        rows = data.get("instances", []) if isinstance(data, dict) else []
+        return [OnDemandInstance.model_validate(item) for item in rows]
+
     def create_compute_target(
         self,
         auth_state: AuthState,
@@ -445,6 +458,7 @@ class TreqsApiClient:
         *,
         from_sequence: int,
         timeout_ms: int,
+        stream: str | None = None,
     ) -> LogPollResult:
         # Keep the HTTP read timeout safely above the server-side long-poll timeout so
         # the request does not abort before the API returns.
@@ -453,7 +467,13 @@ class TreqsApiClient:
             "GET",
             path,
             auth_state=auth_state,
-            params={"from": from_sequence, "timeout": timeout_ms},
+            params={
+                "from": from_sequence,
+                "timeout": timeout_ms,
+                # Omitted entirely when unset: an older API rejects unknown query
+                # params, and the server's own default is the workload stream.
+                **({"stream": stream} if stream else {}),
+            },
             timeout=http_timeout,
         )
         return LogPollResult.model_validate(_unwrap_data(payload))

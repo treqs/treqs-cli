@@ -11,6 +11,7 @@ from ..application.compute.models import (
     ComputeTarget,
     ComputeTargetCreateInput,
     compute_target_rows,
+    instance_rows,
     parse_secret_assignment,
     secret_rows,
 )
@@ -35,6 +36,58 @@ def compute_group() -> None:
 @compute_group.group("targets")
 def compute_targets_group() -> None:
     """Inspect compute targets for the current TReqs owner."""
+
+
+@compute_targets_group.command(
+    "instances",
+    epilog=examples(
+        "treqs compute targets instances <target>",
+        "treqs --json compute targets instances <target>",
+    ),
+)
+@click.argument("target")
+@owner_option
+@click.pass_obj
+def compute_targets_instances_command(
+    state: TreqsContext,
+    target: str,
+    owner: str | None,
+) -> None:
+    """List on-demand instances launched for a compute target.
+
+    TARGET is a compute target ID or name from `treqs compute targets list`.
+
+    DETAIL carries why a launch failed, or why a running instance stopped.
+    A failed instance with no detail means the provider gave no reason.
+    """
+    auth_state, access_context = load_access_context(state)
+    scope = resolve_owner_scope(state, access_context, owner)
+
+    with TreqsApiClient(auth_state.api_url) as client:
+        service = ComputeTargetService(client, auth_state, scope)
+        target_id = resolve_compute_target_id(service.list(), target)
+        instances = service.instances(target_id)
+
+    if state.json_output:
+        emit_json(instances)
+        return
+
+    if not instances:
+        click.echo("No instances have been launched for this target.")
+        return
+
+    render_table(
+        instance_rows(instances),
+        [
+            ("id", "INSTANCE"),
+            ("status", "STATUS"),
+            ("launched", "LAUNCHED"),
+            ("attempts", "TRIES"),
+            ("jobs", "JOBS"),
+            ("cost", "COST"),
+            ("detail", "DETAIL"),
+        ],
+    )
 
 
 @compute_targets_group.command(
@@ -159,6 +212,14 @@ def compute_targets_list_command(
     help="AWS security group ID (--type aws only; repeatable, optional).",
 )
 @click.option(
+    "--agent-channel",
+    "agent_channel",
+    help=(
+        "Agent release channel hosts on this target follow (default: prod). "
+        "Use 'dev' to run a build before it is promoted."
+    ),
+)
+@click.option(
     "--ssh-key-name",
     help="AWS EC2 key pair name to attach to the instance (--type aws only, optional).",
 )
@@ -198,6 +259,7 @@ def compute_targets_create_command(
     ami_id: str | None,
     subnet_ids: tuple[str, ...],
     security_group_ids: tuple[str, ...],
+    agent_channel: str | None,
     ssh_key_name: str | None,
     install_roar: bool,
     roar_ref: str | None,
@@ -239,6 +301,7 @@ def compute_targets_create_command(
                 ami_id=ami_id,
                 subnet_ids=subnet_ids,
                 security_group_ids=security_group_ids,
+                agent_channel=agent_channel,
                 ssh_key_name=ssh_key_name,
                 install_roar=install_roar,
                 roar_ref=roar_ref,
@@ -307,8 +370,9 @@ def _resolve_aws_resources(
         primary = _prompt_choice(
             "primary subnet",
             remaining_subnets,
-            format_item=lambda s: f"{s.id}  (az={s.availabilityZone})"
-            + (f"  {s.name}" if s.name else ""),
+            format_item=lambda s: (
+                f"{s.id}  (az={s.availabilityZone})" + (f"  {s.name}" if s.name else "")
+            ),
             get_id=lambda s: s.id,
             required=False,
             error=errors.get("subnets"),
@@ -323,8 +387,9 @@ def _resolve_aws_resources(
                 fallback = _prompt_choice(
                     "fallback subnet",
                     remaining_subnets,
-                    format_item=lambda s: f"{s.id}  (az={s.availabilityZone})"
-                    + (f"  {s.name}" if s.name else ""),
+                    format_item=lambda s: (
+                        f"{s.id}  (az={s.availabilityZone})" + (f"  {s.name}" if s.name else "")
+                    ),
                     get_id=lambda s: s.id,
                     required=False,
                 )

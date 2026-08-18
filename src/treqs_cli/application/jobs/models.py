@@ -5,6 +5,10 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
+# Reserved stream id for the agent's own log. A task's stream is its id, so a
+# non-UUID sentinel cannot collide with one.
+AGENT_LOG_STREAM = "@agent"
+
 JobStatus = Literal[
     "QUEUED",
     "ASSIGNED",
