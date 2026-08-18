@@ -9,6 +9,7 @@ import httpx
 from .application.compute.models import (
     AwsLaunchOptions,
     ComputeTarget,
+    OnDemandInstance,
     RegistrationCode,
     SecretMetadata,
 )
@@ -295,6 +296,18 @@ class TreqsApiClient:
         params = {"include": "agent"} if include_agent else None
         payload = self.request_json("GET", path, auth_state=auth_state, params=params)
         return [ComputeTarget.model_validate(item) for item in _unwrap_list_data(payload)]
+
+    def list_on_demand_instances(
+        self,
+        auth_state: AuthState,
+        path: str,
+    ) -> list[OnDemandInstance]:
+        payload = self.request_json("GET", path, auth_state=auth_state)
+        data = _unwrap_data(payload)
+        # This endpoint nests its list under `instances` rather than returning a
+        # bare array, unlike the other compute reads.
+        rows = data.get("instances", []) if isinstance(data, dict) else []
+        return [OnDemandInstance.model_validate(item) for item in rows]
 
     def create_compute_target(
         self,

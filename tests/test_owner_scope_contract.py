@@ -28,6 +28,7 @@ OWNER_SCOPED = {
     "projects create",
     "project init",
     "compute targets list",
+    "compute targets instances",
     "compute targets create",
     "compute targets registration-code create",
     "compute secrets set",

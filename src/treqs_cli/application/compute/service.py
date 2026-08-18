@@ -10,6 +10,7 @@ from .models import (
     AwsLaunchOptions,
     ComputeTarget,
     ComputeTargetCreateInput,
+    OnDemandInstance,
     RegistrationCode,
     SecretInput,
     SecretMetadata,
@@ -31,6 +32,12 @@ class ComputeTargetApi(Protocol):
         path: str,
         json_payload: dict[str, object],
     ) -> ComputeTarget: ...
+
+    def list_on_demand_instances(
+        self,
+        auth_state: AuthState,
+        path: str,
+    ) -> list[OnDemandInstance]: ...
 
     def get_provider_launch_options(
         self,
@@ -77,6 +84,12 @@ class ComputeTargetService:
             self.auth_state,
             compute_targets_path(self.scope),
             include_agent=include_agent,
+        )
+
+    def instances(self, target_id: str) -> list[OnDemandInstance]:
+        return self.client.list_on_demand_instances(
+            self.auth_state,
+            compute_target_instances_path(self.scope, target_id),
         )
 
     def create(self, create_input: ComputeTargetCreateInput) -> ComputeTarget:
@@ -137,6 +150,10 @@ def provider_launch_options_path(scope: OwnerScope | RepoContext, provider: str)
 
 def compute_target_path(scope: OwnerScope | RepoContext, target_id: str) -> str:
     return f"{compute_targets_path(scope)}/{target_id}"
+
+
+def compute_target_instances_path(scope: OwnerScope | RepoContext, target_id: str) -> str:
+    return f"{compute_target_path(scope, target_id)}/instances"
 
 
 def compute_target_secrets_path(

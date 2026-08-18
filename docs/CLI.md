@@ -741,6 +741,7 @@ Options:
 
 Commands:
   create             Create a compute target (dedicated, or on-demand for a...
+  instances          List on-demand instances launched for a compute target.
   list               List compute targets for a TReqs owner (or all your...
   registration-code  Manage agent registration codes for compute targets.
 ```
@@ -771,6 +772,9 @@ Options:
                                 default if unset.
   --security-group-id TEXT      AWS security group ID (--type aws only;
                                 repeatable, optional).
+  --agent-channel TEXT          Agent release channel hosts on this target
+                                follow (default: prod). Use 'dev' to run a build
+                                before it is promoted.
   --ssh-key-name TEXT           AWS EC2 key pair name to attach to the instance
                                 (--type aws only, optional).
   --install-roar                Install roar on the instance at startup via the
@@ -793,6 +797,28 @@ Options:
     treqs compute targets create --name team-gpu --owner acme
     treqs compute targets create --kind on-demand --name burst --type runpod \
         --instance-type cpu3c
+```
+
+## `treqs compute targets instances`
+
+```
+Usage: treqs compute targets instances [OPTIONS] TARGET
+
+  List on-demand instances launched for a compute target.
+
+  TARGET is a compute target ID or name from `treqs compute targets list`.
+
+  DETAIL carries why a launch failed, or why a running instance stopped. A
+  failed instance with no detail means the provider gave no reason.
+
+Options:
+  --owner TEXT  Owner username or organization. Defaults to the repo's bound
+                project owner, then your personal owner.
+  --help        Show this message and exit.
+
+  Examples:
+    treqs compute targets instances <target>
+    treqs --json compute targets instances <target>
 ```
 
 ## `treqs compute targets list`

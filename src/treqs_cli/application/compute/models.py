@@ -23,6 +23,43 @@ class ComputeTarget(BaseModel):
     agent: dict[str, Any] | None = None
 
 
+class OnDemandInstance(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
+    id: str
+    status: str
+    region: str | None = None
+    providerInstanceId: str | None = None
+    launchedAt: str | None = None
+    terminatedAt: str | None = None
+    terminationReason: str | None = None
+    # Why a launch failed, when it did. Absent on instances that did not fail —
+    # the provider's own error, e.g. "No default VPC for this user".
+    failureReason: str | None = None
+    launchAttemptCount: int = 0
+    totalRuntimeMinutes: int = 0
+    totalCostCents: int = 0
+    jobsCompleted: int = 0
+    agentId: str | None = None
+
+
+def instance_rows(instances: Sequence[OnDemandInstance]) -> list[dict[str, str]]:
+    return [
+        {
+            "id": (i.providerInstanceId or i.id).split(":")[-1],
+            "status": i.status,
+            "launched": i.launchedAt or "",
+            "attempts": str(i.launchAttemptCount),
+            "jobs": str(i.jobsCompleted),
+            "cost": f"${i.totalCostCents / 100:.2f}",
+            # The reason a launch failed and the reason a running host stopped
+            # answer different questions; show whichever applies.
+            "detail": i.failureReason or i.terminationReason or "",
+        }
+        for i in instances
+    ]
+
+
 class ComputeTargetCreateInput(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -47,6 +84,10 @@ class ComputeTargetCreateInput(BaseModel):
     subnet_ids: tuple[str, ...] = ()
     security_group_ids: tuple[str, ...] = ()
     ssh_key_name: str | None = None
+    # Which agent release channel hosts on this target follow. The API defaults
+    # to "prod" when unset; a target pinned to "dev" runs a build before it is
+    # promoted, without affecting anything else.
+    agent_channel: str | None = None
 
     def to_api_payload(self) -> dict[str, object]:
         if self.kind != "on-demand":
@@ -69,6 +110,8 @@ class ComputeTargetCreateInput(BaseModel):
             resources["userdataScript"] = self.userdata_script
         if self.ami_id is not None:
             resources["amiId"] = self.ami_id
+        if self.agent_channel is not None:
+            resources["agentChannel"] = self.agent_channel
         if self.subnet_ids:
             resources["subnetIds"] = list(self.subnet_ids)
         if self.security_group_ids:
