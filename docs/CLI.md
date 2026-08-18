@@ -741,6 +741,7 @@ Options:
 
 Commands:
   create             Create a compute target (dedicated, or on-demand for a...
+  instances          List on-demand instances launched for a compute target.
   list               List compute targets for a TReqs owner (or all your...
   registration-code  Manage agent registration codes for compute targets.
 ```
@@ -771,6 +772,9 @@ Options:
                                 default if unset.
   --security-group-id TEXT      AWS security group ID (--type aws only;
                                 repeatable, optional).
+  --agent-channel TEXT          Agent release channel hosts on this target
+                                follow (default: prod). Use 'dev' to run a build
+                                before it is promoted.
   --ssh-key-name TEXT           AWS EC2 key pair name to attach to the instance
                                 (--type aws only, optional).
   --install-roar                Install roar on the instance at startup via the
@@ -793,6 +797,28 @@ Options:
     treqs compute targets create --name team-gpu --owner acme
     treqs compute targets create --kind on-demand --name burst --type runpod \
         --instance-type cpu3c
+```
+
+## `treqs compute targets instances`
+
+```
+Usage: treqs compute targets instances [OPTIONS] TARGET
+
+  List on-demand instances launched for a compute target.
+
+  TARGET is a compute target ID or name from `treqs compute targets list`.
+
+  DETAIL carries why a launch failed, or why a running instance stopped. A
+  failed instance with no detail means the provider gave no reason.
+
+Options:
+  --owner TEXT  Owner username or organization. Defaults to the repo's bound
+                project owner, then your personal owner.
+  --help        Show this message and exit.
+
+  Examples:
+    treqs compute targets instances <target>
+    treqs --json compute targets instances <target>
 ```
 
 ## `treqs compute targets list`
@@ -927,11 +953,20 @@ Usage: treqs jobs logs [OPTIONS] JOB_ID
   JOB_ID is the job ID shown by `treqs jobs list` or printed by `treqs tr
   queue`.
 
+  A job's log has more than one producer. By default this prints the workload's
+  own output. `--agent` prints what the agent recorded about the job instead,
+  which is where a task that fails before its command runs explains itself.
+  `--task` narrows the workload output to one step.
+
 Options:
   --target TEXT                   Compute target ID or name. Defaults to the
                                   job's target.
   --follow                        Keep polling until the job's logs are
                                   complete.
+  --agent                         Show the agent's own log instead of the
+                                  workload's output.
+  --task TEXT                     Show only the output of one task. Takes a task
+                                  ID from `treqs jobs tasks`.
   --poll-timeout-ms INTEGER RANGE
                                   Server-side long-poll timeout per request, in
                                   milliseconds.  [default: 30000;
@@ -941,7 +976,8 @@ Options:
   Examples:
     treqs jobs logs <job-id>
     treqs jobs logs <job-id> --follow
-    treqs jobs logs <job-id> --target gpu-box --follow
+    treqs jobs logs <job-id> --agent
+    treqs jobs logs <job-id> --task <task-id>
 ```
 
 ## `treqs jobs republish-lineage`

@@ -16,6 +16,7 @@ from treqs_cli.application.jobs.models import (
 from treqs_cli.commands.jobs import jobs_watch_command
 from treqs_cli.config import AuthStore, RepoContextStore
 from treqs_cli.context import TreqsContext
+from treqs_cli.errors import ConfigError
 from treqs_cli.models import AuthState, RepoContext
 
 
@@ -53,6 +54,7 @@ def test_jobs_watch_sends_lifecycle_to_stderr_and_workload_logs_to_stdout(
             *,
             from_sequence: int,
             timeout_ms: int,
+            stream: str | None = None,
         ) -> LogPollResult:
             del from_sequence, timeout_ms
             return LogPollResult(
@@ -159,3 +161,25 @@ def _context(
         is_git_repo=True,
     )
     return auth_state, repo_context, state
+
+
+def test_jobs_logs_rejects_agent_and_task_together(tmp_path: Path) -> None:
+    """They select different streams; silently preferring one would hide the other."""
+    from treqs_cli.commands.jobs import jobs_logs_command
+
+    state = TreqsContext(
+        api_url_override=None,
+        json_output=False,
+        auth_store=AuthStore(tmp_path / "auth.json"),
+        repo_context_store=RepoContextStore(tmp_path / ".treqs" / "config.toml"),
+        cwd=tmp_path,
+        repo_root=tmp_path,
+        is_interactive=False,
+        is_git_repo=True,
+    )
+    runner = CliRunner()
+    result = runner.invoke(jobs_logs_command, ["job-1", "--agent", "--task", "task-1"], obj=state)
+
+    assert result.exit_code != 0
+    assert isinstance(result.exception, ConfigError)
+    assert "not both" in str(result.exception)
