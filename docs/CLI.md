@@ -740,10 +740,35 @@ Options:
   --help  Show this message and exit.
 
 Commands:
+  archive            Archive a compute target.
   create             Create a compute target (dedicated, or on-demand for a...
   instances          List on-demand instances launched for a compute target.
   list               List compute targets for a TReqs owner (or all your...
   registration-code  Manage agent registration codes for compute targets.
+```
+
+## `treqs compute targets archive`
+
+```
+Usage: treqs compute targets archive [OPTIONS] TARGET
+
+  Archive a compute target.
+
+  TARGET is a compute target ID, a unique name, or a unique ID prefix from
+  `treqs compute targets list`. Archiving is permanent and cannot be undone: the
+  target keeps its existing links and stats, but can no longer be used for new
+  runs or have its operational settings changed. Archiving is blocked while the
+  target has queued or running jobs.
+
+Options:
+  --owner TEXT  Owner username or organization. Defaults to the repo's bound
+                project owner, then your personal owner.
+  -y, --yes     Skip the archive confirmation prompt (for non-interactive use).
+  --help        Show this message and exit.
+
+  Examples:
+    treqs compute targets archive gpu-box
+    treqs compute targets archive gpu-box --yes
 ```
 
 ## `treqs compute targets create`
@@ -830,6 +855,7 @@ Usage: treqs compute targets list [OPTIONS]
 
 Options:
   --include-agent  Include registered agent details.
+  --show-archived  Include archived compute targets (hidden by default).
   --owner TEXT     Owner username or organization. Defaults to the repo's bound
                    project owner, then your personal owner.
   --all            List compute targets across every owner available to you.
@@ -839,6 +865,7 @@ Options:
     treqs compute targets list
     treqs compute targets list --owner acme
     treqs compute targets list --all
+    treqs compute targets list --show-archived
     treqs --json compute targets list --include-agent
 ```
 

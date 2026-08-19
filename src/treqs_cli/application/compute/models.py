@@ -20,6 +20,7 @@ class ComputeTarget(BaseModel):
     ownerId: str | None = None
     hasQueue: bool | None = None
     startupBehavior: str | None = None
+    archivedAt: str | None = None
     agent: dict[str, Any] | None = None
 
 
@@ -265,6 +266,7 @@ def compute_target_rows(
             "kind": target.kind or "",
             "type": target.type,
             "status": target.status or "",
+            "archived": "yes" if target.archivedAt else "",
             "agent": _agent_status(target.agent),
         }
         if owner_by_id is not None:

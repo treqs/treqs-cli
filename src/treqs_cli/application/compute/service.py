@@ -72,6 +72,12 @@ class ComputeTargetApi(Protocol):
         path: str,
     ) -> RegistrationCode: ...
 
+    def archive_compute_target(
+        self,
+        auth_state: AuthState,
+        path: str,
+    ) -> ComputeTarget: ...
+
 
 @dataclass(frozen=True)
 class ComputeTargetService:
@@ -131,6 +137,12 @@ class ComputeTargetService:
             registration_codes_path(self.scope, target_id),
         )
 
+    def archive(self, target_id: str) -> ComputeTarget:
+        return self.client.archive_compute_target(
+            self.auth_state,
+            archive_compute_target_path(self.scope, target_id),
+        )
+
 
 def compute_targets_path(scope: OwnerScope | RepoContext) -> str:
     return owner_path(
@@ -176,6 +188,13 @@ def registration_codes_path(
     target_id: str,
 ) -> str:
     return f"{compute_target_path(scope, target_id)}/agent/registration-codes"
+
+
+def archive_compute_target_path(
+    scope: OwnerScope | RepoContext,
+    target_id: str,
+) -> str:
+    return f"{compute_target_path(scope, target_id)}/archive"
 
 
 def resolve_compute_target_id(

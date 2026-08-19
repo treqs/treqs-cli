@@ -30,6 +30,7 @@ OWNER_SCOPED = {
     "compute targets list",
     "compute targets instances",
     "compute targets create",
+    "compute targets archive",
     "compute targets registration-code create",
     "compute secrets set",
     "compute secrets list",
