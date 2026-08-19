@@ -22,6 +22,7 @@ from treqs_cli.application.compute.models import (
 )
 from treqs_cli.application.compute.service import (
     ComputeTargetService,
+    archive_compute_target_path,
     compute_target_secret_path,
     compute_target_secrets_path,
     compute_targets_path,
@@ -49,6 +50,7 @@ def test_compute_target_rows_and_selection_resolution() -> None:
             "kind": "dedicated",
             "type": "dedicated",
             "status": "",
+            "archived": "",
             "agent": "",
         },
         {
@@ -57,12 +59,30 @@ def test_compute_target_rows_and_selection_resolution() -> None:
             "kind": "on-demand",
             "type": "runpod",
             "status": "",
+            "archived": "",
             "agent": "",
         },
     ]
     assert resolve_compute_target_id(targets, "ct-alpha") == "ct-alpha"
     assert resolve_compute_target_id(targets, "GPU Beta") == "ct-beta"
     assert resolve_compute_target_id(targets, "ct-b") == "ct-beta"
+
+
+def test_compute_target_rows_marks_archived_targets() -> None:
+    targets = [
+        ComputeTarget(id="ct-a", name="A", type="dedicated", kind="dedicated"),
+        ComputeTarget(
+            id="ct-b",
+            name="B",
+            type="dedicated",
+            kind="dedicated",
+            archivedAt="2026-08-18T00:00:00Z",
+        ),
+    ]
+
+    rows = compute_target_rows(targets)
+    assert rows[0]["archived"] == ""
+    assert rows[1]["archived"] == "yes"
 
 
 def test_compute_target_rows_includes_owner_when_owner_map_provided() -> None:
@@ -531,6 +551,23 @@ def test_compute_target_service_create_set_secret_and_registration_code_paths() 
     ]
 
 
+def test_compute_target_service_archive_path() -> None:
+    client = _FakeComputeTargetClient()
+    auth_state = AuthState(api_url="https://api.treqs.ai", access_token="access-token")
+    scope = OwnerScope(owner_username="acme", current_username="trevor")
+    service = ComputeTargetService(client, auth_state, scope)
+
+    archived = service.archive("ct-1")
+
+    assert archived.archivedAt == "2026-08-18T00:00:00Z"
+    assert archive_compute_target_path(scope, "ct-1") == (
+        "/api/v1/user/orgs/acme/compute-targets/ct-1/archive"
+    )
+    assert client.calls == [
+        ("archive", "/api/v1/user/orgs/acme/compute-targets/ct-1/archive"),
+    ]
+
+
 class _FakeComputeTargetClient:
     def __init__(self) -> None:
         self.calls: list[tuple[object, ...]] = []
@@ -606,6 +643,20 @@ class _FakeComputeTargetClient:
         self.calls.append(("registration_code", path))
         return RegistrationCode(id="rc-1", code="ABC123", computeTargetId="ct-1")
 
+    def archive_compute_target(
+        self,
+        _auth_state: AuthState,
+        path: str,
+    ) -> ComputeTarget:
+        self.calls.append(("archive", path))
+        return ComputeTarget(
+            id="ct-1",
+            name="GPU",
+            type="dedicated",
+            kind="dedicated",
+            archivedAt="2026-08-18T00:00:00Z",
+        )
+
 
 class _FakeComputeTargetClientWithManyAwsOptions(_FakeComputeTargetClient):
     """Variant with multiple subnets/security groups, for fallback-subnet and
@@ -669,3 +720,42 @@ def test_confirm_secret_delete_aborts_when_declined(monkeypatch: pytest.MonkeyPa
 
     with pytest.raises(click.Abort):
         _confirm_secret_delete(state, "gpu-box", "HF_TOKEN", yes=False)
+
+
+def test_confirm_archive_yes_bypasses_prompt_non_interactively() -> None:
+    from treqs_cli.commands.compute import _confirm_archive
+
+    state = _build_treqs_context(Path("."), is_interactive=False)
+
+    # Should not raise / should not attempt to read stdin.
+    _confirm_archive(state, "gpu-box", yes=True)
+
+
+def test_confirm_archive_requires_yes_non_interactively() -> None:
+    from treqs_cli.commands.compute import _confirm_archive
+
+    state = _build_treqs_context(Path("."), is_interactive=False)
+
+    with pytest.raises(ConfigError, match="--yes"):
+        _confirm_archive(state, "gpu-box", yes=False)
+
+
+def test_confirm_archive_prompts_and_proceeds_on_accept(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from treqs_cli.commands.compute import _confirm_archive
+
+    state = _build_treqs_context(Path("."), is_interactive=True)
+    monkeypatch.setattr(click, "confirm", lambda *args, **kwargs: True)
+
+    _confirm_archive(state, "gpu-box", yes=False)
+
+
+def test_confirm_archive_aborts_when_declined(monkeypatch: pytest.MonkeyPatch) -> None:
+    from treqs_cli.commands.compute import _confirm_archive
+
+    state = _build_treqs_context(Path("."), is_interactive=True)
+    monkeypatch.setattr(click, "confirm", lambda *args, **kwargs: False)
+
+    with pytest.raises(click.Abort):
+        _confirm_archive(state, "gpu-box", yes=False)

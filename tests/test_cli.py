@@ -1224,6 +1224,194 @@ def test_compute_targets_list_can_run_without_repo_context(
     ]
 
 
+def test_compute_targets_list_hides_archived_by_default(
+    monkeypatch: Any,
+    tmp_path: Path,
+) -> None:
+    config_home = tmp_path / "config"
+    work_dir = tmp_path / "work"
+    work_dir.mkdir()
+    AuthStore(config_home / "auth.json").save(
+        AuthState(api_url="https://api.treqs.ai", access_token="access-token")
+    )
+
+    class FakeClient:
+        def __init__(self, api_url: str) -> None:
+            self.api_url = api_url
+
+        def __enter__(self) -> FakeClient:
+            return self
+
+        def __exit__(self, *_exc: object) -> None:
+            return None
+
+        def get_access_context(self, _auth_state: AuthState) -> AccessContext:
+            return AccessContext.model_validate(_access_context_payload())
+
+        def list_compute_targets(
+            self,
+            auth_state: AuthState,
+            path: str,
+            *,
+            include_agent: bool = False,
+        ) -> list[ComputeTarget]:
+            return [
+                ComputeTarget(id="ct-1", name="Active", type="dedicated", kind="dedicated"),
+                ComputeTarget(
+                    id="ct-2",
+                    name="Archived",
+                    type="dedicated",
+                    kind="dedicated",
+                    archivedAt="2026-08-18T00:00:00Z",
+                ),
+            ]
+
+    monkeypatch.setattr("treqs_cli.commands.compute.TreqsApiClient", FakeClient)
+    monkeypatch.setattr("treqs_cli.commands.shared.TreqsApiClient", FakeClient)
+    monkeypatch.chdir(work_dir)
+    runner = CliRunner()
+    env = {"TREQS_CONFIG_HOME": str(config_home)}
+
+    hidden = runner.invoke(
+        cli,
+        ["--json", "compute", "targets", "list", "--owner", "trevor"],
+        env=env,
+        catch_exceptions=False,
+    )
+    assert hidden.exit_code == 0, hidden.output
+    assert [t["id"] for t in json.loads(hidden.output)] == ["ct-1"]
+
+    shown = runner.invoke(
+        cli,
+        ["--json", "compute", "targets", "list", "--owner", "trevor", "--show-archived"],
+        env=env,
+        catch_exceptions=False,
+    )
+    assert shown.exit_code == 0, shown.output
+    assert [t["id"] for t in json.loads(shown.output)] == ["ct-1", "ct-2"]
+
+
+def test_compute_targets_archive_requires_yes_non_interactively(
+    monkeypatch: Any,
+    tmp_path: Path,
+) -> None:
+    config_home = tmp_path / "config"
+    work_dir = tmp_path / "work"
+    work_dir.mkdir()
+    AuthStore(config_home / "auth.json").save(
+        AuthState(api_url="https://api.treqs.ai", access_token="access-token")
+    )
+
+    class FakeClient:
+        def __init__(self, api_url: str) -> None:
+            self.api_url = api_url
+
+        def __enter__(self) -> FakeClient:
+            return self
+
+        def __exit__(self, *_exc: object) -> None:
+            return None
+
+        def get_access_context(self, _auth_state: AuthState) -> AccessContext:
+            return AccessContext.model_validate(_access_context_payload())
+
+        def list_compute_targets(
+            self,
+            auth_state: AuthState,
+            path: str,
+            *,
+            include_agent: bool = False,
+        ) -> list[ComputeTarget]:
+            return [ComputeTarget(id="ct-1", name="GPU", type="dedicated", kind="dedicated")]
+
+        def archive_compute_target(
+            self,
+            auth_state: AuthState,
+            path: str,
+        ) -> ComputeTarget:
+            raise AssertionError("archive should not be called without confirmation")
+
+    monkeypatch.setattr("treqs_cli.commands.compute.TreqsApiClient", FakeClient)
+    monkeypatch.setattr("treqs_cli.commands.shared.TreqsApiClient", FakeClient)
+    monkeypatch.chdir(work_dir)
+    runner = CliRunner()
+
+    # No --yes, and CliRunner is never a tty: must fail rather than hang on a prompt.
+    result = runner.invoke(
+        cli,
+        ["compute", "targets", "archive", "gpu-box", "--owner", "trevor"],
+        env={"TREQS_CONFIG_HOME": str(config_home)},
+    )
+
+    assert result.exit_code != 0
+    assert isinstance(result.exception, ConfigError)
+    assert "--yes" in str(result.exception)
+
+
+def test_compute_targets_archive_with_yes_calls_api(
+    monkeypatch: Any,
+    tmp_path: Path,
+) -> None:
+    config_home = tmp_path / "config"
+    work_dir = tmp_path / "work"
+    work_dir.mkdir()
+    AuthStore(config_home / "auth.json").save(
+        AuthState(api_url="https://api.treqs.ai", access_token="access-token")
+    )
+    calls: list[tuple[str, str]] = []
+
+    class FakeClient:
+        def __init__(self, api_url: str) -> None:
+            self.api_url = api_url
+
+        def __enter__(self) -> FakeClient:
+            return self
+
+        def __exit__(self, *_exc: object) -> None:
+            return None
+
+        def get_access_context(self, _auth_state: AuthState) -> AccessContext:
+            return AccessContext.model_validate(_access_context_payload())
+
+        def list_compute_targets(
+            self,
+            auth_state: AuthState,
+            path: str,
+            *,
+            include_agent: bool = False,
+        ) -> list[ComputeTarget]:
+            return [ComputeTarget(id="ct-1", name="GPU", type="dedicated", kind="dedicated")]
+
+        def archive_compute_target(
+            self,
+            auth_state: AuthState,
+            path: str,
+        ) -> ComputeTarget:
+            calls.append(("archive", path))
+            return ComputeTarget(
+                id="ct-1",
+                name="GPU",
+                type="dedicated",
+                kind="dedicated",
+                archivedAt="2026-08-18T00:00:00Z",
+            )
+
+    monkeypatch.setattr("treqs_cli.commands.compute.TreqsApiClient", FakeClient)
+    monkeypatch.setattr("treqs_cli.commands.shared.TreqsApiClient", FakeClient)
+    monkeypatch.chdir(work_dir)
+    runner = CliRunner()
+    result = runner.invoke(
+        cli,
+        ["--json", "compute", "targets", "archive", "GPU", "--owner", "trevor", "--yes"],
+        env={"TREQS_CONFIG_HOME": str(config_home)},
+        catch_exceptions=False,
+    )
+
+    assert result.exit_code == 0, result.output
+    assert json.loads(result.output)["archivedAt"] == "2026-08-18T00:00:00Z"
+    assert calls == [("archive", "/api/v1/user/compute-targets/ct-1/archive")]
+
+
 def test_json_flag_is_recognized_at_any_position(
     monkeypatch: Any,
     tmp_path: Path,

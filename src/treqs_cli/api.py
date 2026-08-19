@@ -323,6 +323,14 @@ class TreqsApiClient:
         )
         return ComputeTarget.model_validate(_unwrap_data(payload))
 
+    def archive_compute_target(
+        self,
+        auth_state: AuthState,
+        path: str,
+    ) -> ComputeTarget:
+        payload = self.request_json("POST", path, auth_state=auth_state)
+        return ComputeTarget.model_validate(_unwrap_data(payload))
+
     def get_provider_launch_options(
         self,
         auth_state: AuthState,

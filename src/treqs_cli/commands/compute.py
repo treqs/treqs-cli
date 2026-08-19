@@ -96,10 +96,16 @@ def compute_targets_instances_command(
         "treqs compute targets list",
         "treqs compute targets list --owner acme",
         "treqs compute targets list --all",
+        "treqs compute targets list --show-archived",
         "treqs --json compute targets list --include-agent",
     ),
 )
 @click.option("--include-agent", is_flag=True, help="Include registered agent details.")
+@click.option(
+    "--show-archived",
+    is_flag=True,
+    help="Include archived compute targets (hidden by default).",
+)
 @owner_option
 @click.option(
     "--all",
@@ -111,6 +117,7 @@ def compute_targets_instances_command(
 def compute_targets_list_command(
     state: TreqsContext,
     include_agent: bool,
+    show_archived: bool,
     owner: str | None,
     list_all: bool,
 ) -> None:
@@ -143,6 +150,12 @@ def compute_targets_list_command(
             )
             scope_label = scope.owner_username
 
+    # The API always returns archived targets alongside active ones (their links
+    # and stats stay live), so hiding them by default is purely a client-side
+    # filter over the already-complete list.
+    if not show_archived:
+        targets = [target for target in targets if not target.archivedAt]
+
     if state.json_output:
         emit_json(targets)
         return
@@ -154,6 +167,7 @@ def compute_targets_list_command(
         ("kind", "KIND"),
         ("type", "TYPE"),
         ("status", "STATUS"),
+        ("archived", "ARCHIVED"),
         ("agent", "AGENT"),
     ]
     if list_all:
@@ -320,6 +334,77 @@ def compute_targets_create_command(
     click.echo(f"ID: {target.id}")
     click.echo(f"Kind: {target.kind or kind}")
     click.echo(f"Type: {target.type}")
+
+
+@compute_targets_group.command(
+    "archive",
+    epilog=examples(
+        "treqs compute targets archive gpu-box",
+        "treqs compute targets archive gpu-box --yes",
+    ),
+)
+@click.argument("target")
+@owner_option
+@click.option(
+    "--yes",
+    "-y",
+    is_flag=True,
+    help="Skip the archive confirmation prompt (for non-interactive use).",
+)
+@click.pass_obj
+def compute_targets_archive_command(
+    state: TreqsContext,
+    target: str,
+    owner: str | None,
+    yes: bool,
+) -> None:
+    """Archive a compute target.
+
+    TARGET is a compute target ID, a unique name, or a unique ID prefix
+    from `treqs compute targets list`. Archiving is permanent and cannot be
+    undone: the target keeps its existing links and stats, but can no
+    longer be used for new runs or have its operational settings changed.
+    Archiving is blocked while the target has queued or running jobs.
+    """
+    _confirm_archive(state, target, yes)
+
+    auth_state, access_context = load_access_context(state)
+    scope = resolve_owner_scope(state, access_context, owner)
+
+    with TreqsApiClient(auth_state.api_url) as client:
+        service = ComputeTargetService(client, auth_state, scope)
+        target_id = _resolve_target_id(service, target)
+        archived = service.archive(target_id)
+
+    if state.json_output:
+        emit_json(archived)
+        return
+
+    click.echo(f"Archived compute target {archived.name} ({archived.id}).")
+
+
+def _confirm_archive(state: TreqsContext, target: str, yes: bool) -> None:
+    """Guard against accidentally archiving a target still in active use.
+
+    Needs explicit confirmation: interactively via a prompt, or --yes for
+    scripted/unattended use. In a non-interactive session without --yes,
+    fails loudly instead of hanging on a prompt nobody can answer. Unlike
+    secret deletion, archiving a compute target has no undo, so the prompt
+    says so explicitly.
+    """
+    if yes:
+        return
+    if not state.is_interactive:
+        raise ConfigError(
+            f"Archiving compute target {target}. This is permanent and cannot be "
+            "undone. Re-run with --yes to confirm in a non-interactive session."
+        )
+    if not click.confirm(
+        f"This will archive compute target {target}. This is permanent and cannot "
+        "be undone. Continue?",
+        default=False,
+    ):
+        raise click.Abort()
 
 
 def _resolve_aws_resources(
