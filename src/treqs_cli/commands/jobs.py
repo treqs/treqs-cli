@@ -325,23 +325,7 @@ def jobs_republish_lineage_command(state: TreqsContext, job_id: str) -> None:
         click.echo(f"Lineage URL: {result.published_url}")
 
 
-@jobs_group.command(
-    "cancel",
-    epilog=examples(
-        "treqs jobs cancel <job-id>",
-        "treqs jobs cancel <job-id> --target gpu-box",
-    ),
-)
-@click.argument("job_id")
-@click.option("--target", "target", help="Compute target ID or name. Defaults to the job's target.")
-@click.pass_obj
-def jobs_cancel_command(state: TreqsContext, job_id: str, target: str | None) -> None:
-    """Cancel a queued or running job.
-
-    JOB_ID is the job ID shown by `treqs jobs list` or printed by
-    `treqs tr queue`. Only QUEUED/ASSIGNED/ACQUIRED/IN_PROGRESS jobs can be
-    cancelled; cancelling an already-cancelled job is a no-op.
-    """
+def _stop_job(state: TreqsContext, job_id: str, target: str | None) -> None:
     auth_state, repo_context = load_project_api_context(state)
     scope = OwnerScope(
         owner_username=repo_context.owner_username,
@@ -355,8 +339,48 @@ def jobs_cancel_command(state: TreqsContext, job_id: str, target: str | None) ->
         emit_json(job)
         return
 
-    click.echo(f"Cancelled job {job.id}.")
+    click.echo(f"Stopped job {job.id}.")
     click.echo(f"Status: {job.status}")
+
+
+@jobs_group.command(
+    "stop",
+    epilog=examples(
+        "treqs jobs stop <job-id>",
+        "treqs jobs stop <job-id> --target gpu-box",
+    ),
+)
+@click.argument("job_id")
+@click.option("--target", "target", help="Compute target ID or name. Defaults to the job's target.")
+@click.pass_obj
+def jobs_stop_command(state: TreqsContext, job_id: str, target: str | None) -> None:
+    """Stop a queued or running job.
+
+    JOB_ID is the job ID shown by `treqs jobs list` or printed by
+    `treqs tr queue`. Only QUEUED/ASSIGNED/ACQUIRED/IN_PROGRESS jobs can be
+    stopped; stopping an already-stopped job is a no-op.
+    """
+    _stop_job(state, job_id, target)
+
+
+@jobs_group.command(
+    "cancel",
+    hidden=True,
+    epilog=examples(
+        "treqs jobs cancel <job-id>",
+        "treqs jobs cancel <job-id> --target gpu-box",
+    ),
+)
+@click.argument("job_id")
+@click.option("--target", "target", help="Compute target ID or name. Defaults to the job's target.")
+@click.pass_obj
+def jobs_cancel_command(state: TreqsContext, job_id: str, target: str | None) -> None:
+    """Deprecated alias for `treqs jobs stop`.
+
+    JOB_ID is the job ID shown by `treqs jobs list` or printed by
+    `treqs tr queue`.
+    """
+    _stop_job(state, job_id, target)
 
 
 @jobs_group.command(
@@ -600,7 +624,7 @@ def _event_label(kind: str) -> str:
         "lineage.publication_failed": "publish failed",
         "job.completed": "completed",
         "job.failed": "failed",
-        "job.cancelled": "cancelled",
+        "job.cancelled": "stopped",
     }
     return labels.get(kind, kind)
 
@@ -612,7 +636,7 @@ def render_local_status(label: str, message: str) -> None:
 def render_detached(job_id: str) -> None:
     click.echo(f"Detached from job {job_id}; the job is still running.", err=True)
     click.echo(f"Reattach: treqs jobs watch {job_id}", err=True)
-    click.echo(f"Cancel:   treqs jobs cancel {job_id}", err=True)
+    click.echo(f"Stop:     treqs jobs stop {job_id}", err=True)
 
 
 def _resolve_job_target_id(

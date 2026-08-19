@@ -566,6 +566,36 @@ def requests_open_command(
 
 
 @requests_group.command(
+    "cancel",
+    epilog=examples(
+        "treqs tr cancel <request-id>",
+    ),
+)
+@click.argument("request_id")
+@click.pass_obj
+def requests_cancel_command(state: TreqsContext, request_id: str) -> None:
+    """Cancel a training request.
+
+    REQUEST_ID is the training request ID shown by `treqs tr list`. A
+    cancelled request can be re-opened with `treqs tr open`.
+    """
+    auth_state, repo_context = load_project_api_context(state)
+    with TreqsApiClient(auth_state.api_url) as client:
+        service = TrainingRequestService(client, auth_state, repo_context)
+        request = service.update(
+            request_id,
+            TrainingRequestUpdateInput(status="closed"),
+        )
+
+    if state.json_output:
+        emit_json(request)
+        return
+
+    click.echo(f"Cancelled training request {request.id}.")
+    click.echo(f"Status: {request.status}")
+
+
+@requests_group.command(
     "queue",
     epilog=examples(
         "treqs tr queue <request-id>",
