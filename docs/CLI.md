@@ -349,6 +349,7 @@ Options:
   --help  Show this message and exit.
 
 Commands:
+  cancel   Cancel a training request.
   comment  Post a comment on a training request.
   create   Create a training request in the repo-local project context.
   list     List training requests for the repo-local project context.
@@ -357,6 +358,23 @@ Commands:
   review   Approve or reject an open training request.
   show     Show one training request from the repo-local project context.
   update   Update a training request in the repo-local project context.
+```
+
+## `treqs tr cancel`
+
+```
+Usage: treqs tr cancel [OPTIONS] REQUEST_ID
+
+  Cancel a training request.
+
+  REQUEST_ID is the training request ID shown by `treqs tr list`. A cancelled
+  request can be re-opened with `treqs tr open`.
+
+Options:
+  --help  Show this message and exit.
+
+  Examples:
+    treqs tr cancel <request-id>
 ```
 
 ## `treqs tr comment`
@@ -920,11 +938,11 @@ Options:
   --help  Show this message and exit.
 
 Commands:
-  cancel             Cancel a queued or running job.
   list               List jobs for the repo-local project context.
   logs               Print logs for a job, optionally following until...
   republish-lineage  Re-publish a job's stored lineage package to GLaaS.
   show               Show one job from the repo-local project context.
+  stop               Stop a queued or running job.
   tasks              Show each task of a job with its status and exit code.
   wait               Wait for a job to complete, fail, or be cancelled.
   watch              Stream lifecycle status and workload logs until a job...
@@ -935,11 +953,10 @@ Commands:
 ```
 Usage: treqs jobs cancel [OPTIONS] JOB_ID
 
-  Cancel a queued or running job.
+  Deprecated alias for `treqs jobs stop`.
 
   JOB_ID is the job ID shown by `treqs jobs list` or printed by `treqs tr
-  queue`. Only QUEUED/ASSIGNED/ACQUIRED/IN_PROGRESS jobs can be cancelled;
-  cancelling an already-cancelled job is a no-op.
+  queue`.
 
 Options:
   --target TEXT  Compute target ID or name. Defaults to the job's target.
@@ -1041,6 +1058,26 @@ Options:
   Examples:
     treqs jobs show <job-id>
     treqs --json jobs show <job-id>
+```
+
+## `treqs jobs stop`
+
+```
+Usage: treqs jobs stop [OPTIONS] JOB_ID
+
+  Stop a queued or running job.
+
+  JOB_ID is the job ID shown by `treqs jobs list` or printed by `treqs tr
+  queue`. Only QUEUED/ASSIGNED/ACQUIRED/IN_PROGRESS jobs can be stopped;
+  stopping an already-stopped job is a no-op.
+
+Options:
+  --target TEXT  Compute target ID or name. Defaults to the job's target.
+  --help         Show this message and exit.
+
+  Examples:
+    treqs jobs stop <job-id>
+    treqs jobs stop <job-id> --target gpu-box
 ```
 
 ## `treqs jobs tasks`
