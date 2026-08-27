@@ -206,6 +206,39 @@ def test_whoami_uses_env_api_token_without_stored_login(monkeypatch: Any, tmp_pa
     assert not (config_home / "auth.json").exists()
 
 
+def test_whoami_json_omits_auth_secrets(monkeypatch: Any, tmp_path: Path) -> None:
+    _install_fake_client(monkeypatch)
+    config_home = tmp_path / "config"
+    AuthStore(config_home / "auth.json").save(
+        AuthState(
+            api_url="https://api.treqs.ai",
+            access_token="treqs_pat_secret",
+            refresh_token="refresh-secret",
+            provider="token",
+        )
+    )
+    monkeypatch.chdir(tmp_path)
+    runner = CliRunner()
+
+    result = runner.invoke(
+        cli,
+        ["--json", "whoami"],
+        env=_env(config_home),
+        catch_exceptions=False,
+    )
+
+    assert result.exit_code == 0, result.output
+    payload = json.loads(result.output)
+    assert payload["auth"] == {
+        "api_url": "https://api.treqs.ai",
+        "provider": "token",
+        "token_type": "Bearer",
+    }
+    assert payload["access_context"]["user"]["username"] == "trevor"
+    assert "treqs_pat_secret" not in result.output
+    assert "refresh-secret" not in result.output
+
+
 def test_env_api_token_takes_precedence_over_stored_auth(monkeypatch: Any, tmp_path: Path) -> None:
     fake = _install_fake_client(monkeypatch)
     config_home = tmp_path / "config"

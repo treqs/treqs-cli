@@ -149,7 +149,16 @@ def whoami_command(state: TreqsContext) -> None:
     """
     auth_state, access_context = load_access_context(state)
     if state.json_output:
-        emit_json({"auth": auth_state, "access_context": access_context})
+        emit_json(
+            {
+                "auth": {
+                    "api_url": auth_state.api_url,
+                    "provider": auth_state.provider,
+                    "token_type": auth_state.token_type,
+                },
+                "access_context": access_context,
+            }
+        )
         return
 
     user = access_context.user
